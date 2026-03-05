@@ -1,0 +1,79 @@
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: secure-link-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-securelink}
+    ports:
+      - "5434:5432"  # Port externe 5434, port interne 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - secure-link-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Application NestJS
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-link-app
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      # Application
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-securelink}
+      
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-15m}
+      JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-7d}
+      
+      # MinIO (déjà configuré sur serveur externe)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-secure-forms}
+      
+      # Email
+      EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+      
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://86.106.181.31,http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - secure-link-network
+    volumes:
+      # Volume pour les uploads locaux (si nécessaire)
+      - ./uploads:/app/uploads
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  secure-link-network:
+    driver: bridge
+

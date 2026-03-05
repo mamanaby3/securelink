@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Gestion des Formulaires | Secure Link</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e0e0;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        /* Search and Filters */
+        .search-filters {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 300px;
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 10px 15px 10px 40px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .search-box::before {
+            content: '🔍';
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 16px;
+        }
+
+        .filter-btn {
+            padding: 10px 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #555;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            background: #f5f5f5;
+            border-color: #bbb;
+        }
+
+        .filter-btn::before {
+            content: '🔽';
+            font-size: 12px;
+        }
+
+        /* Table */
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        td {
+            padding: 15px;
+            font-size: 14px;
+        }
+
+        .form-name {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .form-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .form-info h3 {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 3px;
+        }
+
+        .form-info span {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-active {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .status-active::before {
+            background: #4caf50;
+        }
+
+        .status-inactive {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .status-inactive::before {
+            background: #f44336;
+        }
+
+        .status-draft {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .status-draft::before {
+            background: #ff9800;
+        }
+
+        .requirement-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
+
+        .requirement-required {
+            color: #c62828;
+        }
+
+        .requirement-required::before {
+            content: '●';
+            color: #f44336;
+        }
+
+        .requirement-not-required {
+            color: #757575;
+        }
+
+        .requirement-not-required::before {
+            content: '○';
+            color: #9e9e9e;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.2s;
+            color: #1976d2;
+        }
+
+        .action-btn:hover {
+            background: #e3f2fd;
+        }
+
+        /* Pagination */
+        .pagination {
+            background: white;
+            padding: 20px 30px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            border-radius: 0 0 8px 8px;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .pagination-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #555;
+            transition: all 0.2s;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: #f5f5f5;
+            border-color: #bbb;
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination-page {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            color: #555;
+            transition: all 0.2s;
+        }
+
+        .pagination-page.active {
+            background: #14b8a6;
+            color: white;
+            border-color: #14b8a6;
+        }
+
+        .pagination-page:hover:not(.active) {
+            background: #f5f5f5;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #4caf50;
+        }
+
+        .alert-error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #f44336;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state::before {
+            content: '📄';
+            font-size: 48px;
+            display: block;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Gestion des Types de Documents</h1>
+            <p>Administration des types de documents disponibles sur la plateforme</p>
+        </div>
+
+        <div class="search-filters">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Rechercher un document" />
+            </div>
+            <button class="filter-btn" onclick="showStatusFilter()">Tous les statuts</button>
+            <button class="filter-btn" onclick="showCategoryFilter()">Tous les catégories</button>
+        </div>
+
+        <div id="errorMessage" class="error" style="display: none;"></div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nom du formulaire</th>
+                        <th>Durée de validité</th>
+                        <th>Vérification d'identité</th>
+                        <th>Statut</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="formsTableBody">
+                    <tr>
+                        <td colspan="5" class="loading">Chargement des formulaires...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pagination" id="pagination" style="display: none;">
+            <div class="pagination-info" id="paginationInfo"></div>
+            <div class="pagination-controls" id="paginationControls"></div>
+        </div>
+    </div>
+
+    <script>
+        const baseUrl = 'http://localhost:3000/api';
+        let allForms = [];
+        let filteredForms = [];
+        let currentPage = 1;
+        const itemsPerPage = 10;
+        let currentStatusFilter = 'all';
+        let currentCategoryFilter = 'all';
+        let searchQuery = '';
+
+        // Charger les formulaires au chargement de la page
+        window.addEventListener('DOMContentLoaded', () => {
+            loadForms();
+            setupSearch();
+        });
+
+        // Configuration de la recherche
+        function setupSearch() {
+            const searchInput = document.getElementById('searchInput');
+            let searchTimeout;
+
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    searchQuery = e.target.value.toLowerCase();
+                    applyFilters();
+                }, 300);
+            });
+        }
+
+        // Charger les types de documents depuis l'API
+        async function loadForms() {
+            try {
+                const token = localStorage.getItem('accessToken');
+                if (!token) {
+                    showError('Veuillez vous connecter en tant qu\'administrateur');
+                    return;
+                }
+
+                const response = await fetch(`${baseUrl}/documents/types`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        showError('Session expirée. Veuillez vous reconnecter.');
+                        return;
+                    }
+                    throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+                }
+
+                allForms = await response.json();
+                applyFilters();
+            } catch (error) {
+                showError('Erreur lors du chargement des types de documents: ' + error.message);
+                document.getElementById('formsTableBody').innerHTML =
+                    '<tr><td colspan="5" class="empty-state">Erreur de chargement</td></tr>';
+            }
+        }
+
+        // Appliquer les filtres
+        function applyFilters() {
+            filteredForms = allForms.filter(form => {
+                // Filtre de recherche
+                if (searchQuery) {
+                    const searchableText = `${form.title || ''}`.toLowerCase();
+                    if (!searchableText.includes(searchQuery)) {
+                        return false;
+                    }
+                }
+
+                // Filtre de statut (isActive)
+                if (currentStatusFilter !== 'all') {
+                    const isActive = currentStatusFilter === 'ONLINE';
+                    if (form.isActive !== isActive) {
+                        return false;
+                    }
+                }
+
+                // Filtre de catégorie (basé sur le titre ou description)
+                if (currentCategoryFilter !== 'all') {
+                    // Pour les types de documents, on peut filtrer par catégorie si nécessaire
+                    // Pour l'instant, on garde cette logique pour compatibilité
+                }
+
+                return true;
+            });
+
+            renderTable();
+            renderPagination();
+        }
+
+        // Rendre le tableau
+        function renderTable() {
+            const tbody = document.getElementById('formsTableBody');
+
+            if (filteredForms.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Aucun formulaire trouvé</td></tr>';
+                return;
+            }
+
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const pageForms = filteredForms.slice(startIndex, endIndex);
+
+            tbody.innerHTML = pageForms.map(form => {
+                const statusClass = getStatusClass(form.isActive ? 'ONLINE' : 'OFFLINE');
+                const statusText = getStatusText(form.isActive ? 'ONLINE' : 'OFFLINE');
+                const icon = getDocumentIcon(form.title);
+                const category = getDocumentCategory(form.title);
+
+                return `
+                    <tr>
+                        <td>
+                            <div class="form-name">
+                                <div class="form-icon">${icon}</div>
+                                <div class="form-info">
+                                    <h3>${escapeHtml(form.title)}</h3>
+                                    <span>${category}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="requirement-badge ${form.hasExpirationDate ? 'requirement-required' : 'requirement-not-required'}">
+                                ${form.hasExpirationDate ? 'Requis' : 'Non requis'}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="requirement-badge ${form.isForIdentityVerification ? 'requirement-required' : 'requirement-not-required'}">
+                                ${form.isForIdentityVerification ? 'Requis' : 'Non requis'}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                        </td>
+                        <td>
+                            <div class="actions">
+                                <button class="action-btn" onclick="editForm('${form.id}')" title="Modifier">✏️</button>
+                                <button class="action-btn" onclick="toggleFormStatus('${form.id}', ${form.isActive})" title="${form.isActive ? 'Désactiver' : 'Activer'}">
+                                    ${form.isActive ? '🔒' : '🔓'}
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Rendre la pagination
+        function renderPagination() {
+            const totalPages = Math.ceil(filteredForms.length / itemsPerPage);
+            const pagination = document.getElementById('pagination');
+            const paginationInfo = document.getElementById('paginationInfo');
+            const paginationControls = document.getElementById('paginationControls');
+
+            if (totalPages <= 1) {
+                pagination.style.display = 'none';
+                return;
+            }
+
+            pagination.style.display = 'flex';
+
+            const start = (currentPage - 1) * itemsPerPage + 1;
+            const end = Math.min(currentPage * itemsPerPage, filteredForms.length);
+            paginationInfo.textContent = `Affichage de ${start} à ${end} sur ${filteredForms.length} résultats`;
+
+            let controlsHTML = `
+                <button class="pagination-btn" onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                    Précédent
+                </button>
+            `;
+
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+                    controlsHTML += `
+                        <button class="pagination-page ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">
+                            ${i}
+                        </button>
+                    `;
+                } else if (i === currentPage - 2 || i === currentPage + 2) {
+                    controlsHTML += `<span style="padding: 8px;">...</span>`;
+                }
+            }
+
+            controlsHTML += `
+                <button class="pagination-btn" onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                    Suivant
+                </button>
+            `;
+
+            paginationControls.innerHTML = controlsHTML;
+        }
+
+        // Changer de page
+        function changePage(page) {
+            const totalPages = Math.ceil(filteredForms.length / itemsPerPage);
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            renderTable();
+            renderPagination();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Fonctions utilitaires
+        function getStatusClass(status) {
+            const statusMap = {
+                'ONLINE': 'status-active',
+                'OFFLINE': 'status-inactive',
+                'DRAFT': 'status-draft'
+            };
+            return statusMap[status] || 'status-draft';
+        }
+
+        function getStatusText(status) {
+            const statusMap = {
+                'ONLINE': 'Active',
+                'OFFLINE': 'Désactivé',
+                'DRAFT': 'Brouillon'
+            };
+            return statusMap[status] || status;
+        }
+
+        function getDocumentIcon(title) {
+            const titleLower = title.toLowerCase();
+            if (titleLower.includes('identité') || titleLower.includes('cni') || titleLower.includes('carte')) {
+                return '🪪';
+            } else if (titleLower.includes('domicile') || titleLower.includes('résidence')) {
+                return '📄';
+            } else if (titleLower.includes('naissance') || titleLower.includes('acte')) {
+                return '📄';
+            } else if (titleLower.includes('propriété') || titleLower.includes('titre')) {
+                return '⚖️';
+            }
+            return '📄';
+        }
+
+        function getDocumentCategory(title) {
+            const titleLower = title.toLowerCase();
+            if (titleLower.includes('identité') || titleLower.includes('cni') || titleLower.includes('carte')) {
+                return 'Identité';
+            } else if (titleLower.includes('domicile') || titleLower.includes('résidence')) {
+                return 'Résidence';
+            } else if (titleLower.includes('naissance') || titleLower.includes('acte')) {
+                return 'État civil';
+            } else if (titleLower.includes('propriété') || titleLower.includes('titre')) {
+                return 'Légal';
+            }
+            return 'Général';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showError(message, type = 'error') {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+
+            // Changer la classe selon le type
+            if (type === 'success') {
+                errorDiv.className = 'alert alert-success';
+            } else {
+                errorDiv.className = 'error alert-error';
+            }
+
+            errorDiv.style.display = 'block';
+
+            // Masquer après un délai
+            const delay = type === 'success' ? 3000 : 5000;
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, delay);
+        }
+
+        // Actions
+        function editForm(formId) {
+            alert(`Modifier le formulaire ${formId}\n\nCette fonctionnalité sera implémentée pour ouvrir l'éditeur de formulaire.`);
+            // TODO: Rediriger vers la page d'édition ou ouvrir un modal
+        }
+
+        async function toggleFormStatus(formId, isActive) {
+            try {
+                const token = localStorage.getItem('accessToken');
+                if (!token) {
+                    showError('Veuillez vous connecter');
+                    return;
+                }
+
+                const newStatus = !isActive;
+                console.log('Mise à jour du statut:', { formId, isActive, newStatus });
+
+                const response = await fetch(`${baseUrl}/documents/types/${formId}/status`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ isActive: newStatus })
+                });
+
+                if (!response.ok) {
+                    let errorMessage = 'Erreur lors de la mise à jour du statut';
+                    try {
+                        const error = await response.json();
+                        errorMessage = error.message || errorMessage;
+                        if (Array.isArray(error.message)) {
+                            errorMessage = error.message.join(', ');
+                        }
+                    } catch (e) {
+                        errorMessage = `Erreur ${response.status}: ${response.statusText}`;
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                const result = await response.json();
+                console.log('Statut mis à jour:', result);
+
+                // Recharger les types de documents
+                await loadForms();
+                showError('Statut mis à jour avec succès', 'success');
+            } catch (error) {
+                console.error('Erreur toggleFormStatus:', error);
+                showError('Erreur: ' + error.message);
+            }
+        }
+
+        function showStatusFilter() {
+            const statuses = ['all', 'ONLINE', 'OFFLINE'];
+            const statusTexts = ['Tous les statuts', 'Active', 'Désactivé'];
+            const choice = prompt(`Choisir un statut:\n${statuses.map((s, i) => `${i + 1}. ${statusTexts[i]}`).join('\n')}`);
+            const index = parseInt(choice) - 1;
+            if (index >= 0 && index < statuses.length) {
+                currentStatusFilter = statuses[index];
+                currentPage = 1;
+                applyFilters();
+                document.querySelectorAll('.filter-btn')[0].textContent = statusTexts[index] + ' 🔽';
+            }
+        }
+
+        function showCategoryFilter() {
+            // Pour les types de documents, on peut filtrer par catégorie basée sur le titre
+            const categories = ['all', 'Identité', 'Résidence', 'État civil', 'Légal'];
+            const choice = prompt(`Choisir une catégorie:\n${categories.map((c, i) => `${i + 1}. ${c}`).join('\n')}`);
+            const index = parseInt(choice) - 1;
+            if (index >= 0 && index < categories.length) {
+                currentCategoryFilter = categories[index];
+                currentPage = 1;
+                applyFilters();
+                document.querySelectorAll('.filter-btn')[1].textContent = categories[index] + ' 🔽';
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Link - Test des Endpoints API</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        .sidebar {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .sidebar h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .sidebar-section {
+            margin-bottom: 20px;
+        }
+
+        .sidebar-section h3 {
+            color: #333;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .endpoint-list {
+            list-style: none;
+        }
+
+        .endpoint-item {
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 13px;
+            color: #555;
+        }
+
+        .endpoint-item:hover {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .endpoint-item.active {
+            background: #333;
+            color: white;
+        }
+
+        .content-area {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .endpoint-form {
+            margin-bottom: 30px;
+        }
+
+        .endpoint-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .method-badge {
+            padding: 5px 12px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .method-get { background: #61affe; color: white; }
+        .method-post { background: #49cc90; color: white; }
+        .method-patch { background: #fca130; color: white; }
+        .method-delete { background: #f93e3e; color: white; }
+
+        .endpoint-title {
+            font-size: 18px;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #333;
+        }
+
+        .form-group textarea {
+            min-height: 150px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #333;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .response-area {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+
+        .response-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .response-header h3 {
+            color: #333;
+            font-size: 16px;
+        }
+
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .status-success { background: #49cc90; color: white; }
+        .status-error { background: #f93e3e; color: white; }
+        .status-info { background: #61affe; color: white; }
+
+        .response-body {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .token-section {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #ffc107;
+        }
+
+        .token-section h3 {
+            color: #856404;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .token-display {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .token-display input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .token-display button {
+            padding: 8px 15px;
+            background: #ffc107;
+            color: #856404;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .variables-section {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #333;
+        }
+
+        .variables-section h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        .variable-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            font-size: 12px;
+        }
+
+        .variable-item span {
+            color: #555;
+        }
+
+        .variable-item input {
+            flex: 1;
+            margin-left: 10px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Secure Link - Test des Endpoints API</h1>
+            <p>Interface de test interactive pour tous les endpoints de l'API</p>
+        </div>
+
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="token-section">
+                    <h3>🔑 Token JWT</h3>
+                    <div class="token-display">
+                        <input type="text" id="jwtToken" placeholder="Token JWT (auto-rempli après login)">
+                        <button onclick="copyToken()">Copier</button>
+                    </div>
+                </div>
+
+                <div class="variables-section">
+                    <h3>📝 Variables</h3>
+                    <div class="variable-item">
+                        <span>Base URL:</span>
+                        <input type="text" id="baseUrl" value="http://localhost:3000/api">
+                    </div>
+                    <div class="variable-item">
+                        <span>User ID:</span>
+                        <input type="text" id="userId" placeholder="Auto-rempli">
+                    </div>
+                    <div class="variable-item">
+                        <span>Org ID:</span>
+                        <input type="text" id="organisationId" placeholder="À définir">
+                    </div>
+                    <div class="variable-item">
+                        <span>Form ID:</span>
+                        <input type="text" id="formId" placeholder="Auto-rempli">
+                    </div>
+                    <div class="variable-item">
+                        <span>Request ID:</span>
+                        <input type="text" id="requestId" placeholder="Auto-rempli">
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>🔐 Authentification</h3>
+                    <ul class="endpoint-list">
+                        <li class="endpoint-item" onclick="loadEndpoint('login-admin')">Login Admin</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('login-client')">Login Client</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('login-organisation')">Login Organisation</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('register-step1')">Inscription Étape 1</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('profile')">Mon Profil</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('change-password')">Changer MDP</li>
+                    </ul>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>👤 Clients</h3>
+                    <ul class="endpoint-list">
+                        <li class="endpoint-item" onclick="loadEndpoint('create-request')">Créer Demande</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('my-requests')">Mes Demandes</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('request-details')">Détails Demande</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('request-statistics')">Statistiques</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('organisations')">Organisations</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('forms')">Formulaires</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('upload-document')">Upload Document</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('my-documents')">Mes Documents</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('update-profile')">Mettre à jour Profil</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('archives')">Mes Archives</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('recent-requests')">Demandes Récentes</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('expiring-documents')">Documents Expirants</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('notifications')">Notifications</li>
+                    </ul>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>🏢 Organisations</h3>
+                    <ul class="endpoint-list">
+                        <li class="endpoint-item" onclick="loadEndpoint('create-org-user')">Créer Utilisateur</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('org-users')">Liste Employés</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('start-request')">Démarrer Traitement</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('validate-request')">Valider Demande</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('reject-request')">Rejeter Demande</li>
+                    </ul>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>👨‍💼 Admin</h3>
+                    <ul class="endpoint-list">
+                        <li class="endpoint-item" onclick="loadEndpoint('create-sector')">Créer Secteur</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('create-form-type')">Créer Type Formulaire</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('create-role')">Créer Rôle</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('create-form')">Créer Formulaire</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('update-form-fields')">Modifier Champs Formulaire</li>
+                        <li class="endpoint-item" onclick="loadEndpoint('create-doc-type')">Créer Type Document</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="content-area">
+                <div id="endpoint-content">
+                    <div style="text-align: center; padding: 50px; color: #666;">
+                        <h2>👈 Sélectionnez un endpoint dans le menu</h2>
+                        <p>Choisissez un endpoint à tester depuis le menu de gauche</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const baseUrl = 'http://localhost:3000/api';
+        let currentEndpoint = null;
+
+        // Endpoints configuration
+        const endpoints = {
+            'login-admin': {
+                method: 'POST',
+                url: '/auth/login/admin',
+                title: 'Connexion Admin',
+                body: {
+                    email: 'admin@securelink.com',
+                    password: 'Admin123!'
+                },
+                saveToken: true
+            },
+            'login-client': {
+                method: 'POST',
+                url: '/auth/login/client',
+                title: 'Connexion Client',
+                body: {
+                    email: 'client@example.com',
+                    password: 'Client123!'
+                },
+                saveToken: true
+            },
+            'login-organisation': {
+                method: 'POST',
+                url: '/auth/login/organisation',
+                title: 'Connexion Organisation',
+                body: {
+                    email: 'agent@banque.sn',
+                    password: 'Agent123!'
+                },
+                saveToken: true
+            },
+            'register-step1': {
+                method: 'POST',
+                url: '/auth/register/client/step1',
+                title: 'Inscription Client - Étape 1',
+                body: {
+                    email: 'nouveau@client.com',
+                    password: 'Client123!',
+                    name: 'Anna Maria',
+                    firstName: 'Anna',
+                    lastName: 'Maria',
+                    phone: '77 123 45 67'
+                }
+            },
+            'profile': {
+                method: 'GET',
+                url: '/auth/profile',
+                title: 'Mon Profil',
+                requiresAuth: true
+            },
+            'change-password': {
+                method: 'PATCH',
+                url: '/auth/change-password',
+                title: 'Changer le Mot de Passe',
+                requiresAuth: true,
+                body: {
+                    oldPassword: 'AncienMotDePasse123!',
+                    newPassword: 'NouveauMotDePasse123!',
+                    confirmPassword: 'NouveauMotDePasse123!'
+                }
+            },
+            'create-request': {
+                method: 'POST',
+                url: '/requests',
+                title: 'Créer une Demande',
+                requiresAuth: true,
+                body: {
+                    formId: '',
+                    organisationId: '',
+                    beneficiary: {
+                        name: 'Oumy Ly',
+                        email: 'oumy.ly@gmail.com',
+                        phone: '70 645 87 92'
+                    },
+                    amount: 150000
+                },
+                saveId: 'requestId'
+            },
+            'my-requests': {
+                method: 'GET',
+                url: '/requests',
+                title: 'Mes Demandes',
+                requiresAuth: true
+            },
+            'request-details': {
+                method: 'GET',
+                url: '/requests/{requestId}',
+                title: 'Détails d\'une Demande',
+                requiresAuth: true,
+                hasParams: true
+            },
+            'request-statistics': {
+                method: 'GET',
+                url: '/requests/statistics',
+                title: 'Statistiques de Mes Demandes',
+                requiresAuth: true
+            },
+            'organisations': {
+                method: 'GET',
+                url: '/organisations',
+                title: 'Organisations Disponibles',
+                requiresAuth: true
+            },
+            'forms': {
+                method: 'GET',
+                url: '/forms',
+                title: 'Formulaires Disponibles',
+                requiresAuth: true
+            },
+            'upload-document': {
+                method: 'POST',
+                url: '/users/profile/documents',
+                title: 'Uploader un Document',
+                requiresAuth: true,
+                isFileUpload: true
+            },
+            'my-documents': {
+                method: 'GET',
+                url: '/users/profile/documents',
+                title: 'Mes Documents',
+                requiresAuth: true
+            },
+            'update-profile': {
+                method: 'PATCH',
+                url: '/users/profile',
+                title: 'Mettre à Jour Mon Profil',
+                requiresAuth: true,
+                body: {
+                    firstName: 'Lamine',
+                    lastName: 'Faye',
+                    phone: '77 000 00 00',
+                    address: 'Yoff',
+                    maritalStatus: 'CELIBATAIRE'
+                }
+            },
+            'archives': {
+                method: 'GET',
+                url: '/users/archives',
+                title: 'Mes Archives',
+                requiresAuth: true
+            },
+            'recent-requests': {
+                method: 'GET',
+                url: '/users/recent-requests',
+                title: 'Demandes Récentes',
+                requiresAuth: true
+            },
+            'expiring-documents': {
+                method: 'GET',
+                url: '/users/expiring-documents',
+                title: 'Documents Expirant Bientôt',
+                requiresAuth: true
+            },
+            'notifications': {
+                method: 'GET',
+                url: '/users/notifications',
+                title: 'Mes Notifications',
+                requiresAuth: true
+            },
+            'create-org-user': {
+                method: 'POST',
+                url: '/users/organisation',
+                title: 'Créer un Utilisateur pour l\'Organisation',
+                requiresAuth: true,
+                body: {
+                    name: 'Lamine Niang',
+                    email: 'ln@banque.sn',
+                    phone: '77 111 11 11',
+                    organisationRole: 'AGENT'
+                }
+            },
+            'org-users': {
+                method: 'GET',
+                url: '/organisations/{organisationId}/users',
+                title: 'Liste des Employés de l\'Organisation',
+                requiresAuth: true,
+                hasParams: true
+            },
+            'start-request': {
+                method: 'POST',
+                url: '/requests/{requestId}/start',
+                title: 'Démarrer le Traitement d\'une Demande',
+                requiresAuth: true,
+                hasParams: true
+            },
+            'validate-request': {
+                method: 'POST',
+                url: '/requests/{requestId}/validate',
+                title: 'Valider une Demande',
+                requiresAuth: true,
+                hasParams: true
+            },
+            'reject-request': {
+                method: 'POST',
+                url: '/requests/{requestId}/reject',
+                title: 'Rejeter une Demande',
+                requiresAuth: true,
+                hasParams: true,
+                body: {
+                    reason: 'Documents manquants ou invalides'
+                }
+            },
+            'create-sector': {
+                method: 'POST',
+                url: '/settings/sectors',
+                title: 'Créer un Secteur',
+                requiresAuth: true,
+                body: {
+                    name: 'Banque',
+                    description: 'Toutes les institutions financières proposant des services bancaires et crédits.'
+                }
+            },
+            'create-form-type': {
+                method: 'POST',
+                url: '/settings/form-types',
+                title: 'Créer un Type de Formulaire',
+                requiresAuth: true,
+                body: {
+                    name: 'Transaction',
+                    description: 'Permet d\'exécuter une opération officielle (paiement, transfert,...)'
+                }
+            },
+            'create-role': {
+                method: 'POST',
+                url: '/settings/roles',
+                title: 'Créer un Rôle',
+                requiresAuth: true,
+                body: {
+                    name: 'Administrateur',
+                    description: 'Gère l\'ensemble de la plateforme'
+                }
+            },
+            'create-form': {
+                method: 'POST',
+                url: '/forms',
+                title: 'Créer un Formulaire',
+                requiresAuth: true,
+                body: {
+                    name: 'Demande de virement',
+                    version: '1.0',
+                    description: 'Formulaire pour effectuer un virement bancaire',
+                    sector: 'BANQUE',
+                    formType: 'TRANSACTION',
+                    organisationId: '',
+                    requiredDocuments: ['CARTE_IDENTITE', 'JUSTIFICATIF_DOMICILE'],
+                    editableFields: [
+                        {
+                            name: 'Nom du bénéficiaire',
+                            type: 'text',
+                            required: true,
+                            label: 'Nom du bénéficiaire',
+                            placeholder: 'Entrez le nom du bénéficiaire'
+                        }
+                    ]
+                },
+                saveId: 'formId'
+            },
+            'update-form-fields': {
+                method: 'PATCH',
+                url: '/forms/{formId}/fields',
+                title: 'Modifier les Champs et Documents d\'un Formulaire',
+                requiresAuth: true,
+                hasParams: true,
+                body: {
+                    editableFields: [
+                        {
+                            name: 'Nom du bénéficiaire',
+                            type: 'text',
+                            required: true,
+                            label: 'Nom du bénéficiaire'
+                        },
+                        {
+                            name: 'IBAN',
+                            type: 'text',
+                            required: true,
+                            label: 'IBAN'
+                        }
+                    ],
+                    requiredDocuments: ['CARTE_IDENTITE', 'JUSTIFICATIF_DOMICILE', 'RELEVE_BANCAIRE']
+                }
+            },
+            'create-doc-type': {
+                method: 'POST',
+                url: '/documents/types',
+                title: 'Créer un Type de Document',
+                requiresAuth: true,
+                body: {
+                    name: 'Carte d\'identité',
+                    description: 'Carte nationale d\'identité valide'
+                }
+            }
+        };
+
+        function loadEndpoint(endpointKey) {
+            currentEndpoint = endpointKey;
+            const endpoint = endpoints[endpointKey];
+            if (!endpoint) return;
+
+            // Update active item
+            document.querySelectorAll('.endpoint-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Replace variables in URL
+            let url = endpoint.url;
+            url = url.replace('{requestId}', document.getElementById('requestId').value || '{requestId}');
+            url = url.replace('{formId}', document.getElementById('formId').value || '{formId}');
+            url = url.replace('{organisationId}', document.getElementById('organisationId').value || '{organisationId}');
+
+            // Replace variables in body
+            let body = JSON.stringify(endpoint.body || {}, null, 2);
+            if (endpoint.body) {
+                if (endpoint.body.organisationId === '') {
+                    body = body.replace('"organisationId": ""', `"organisationId": "${document.getElementById('organisationId').value || ''}"`);
+                }
+                if (endpoint.body.formId === '') {
+                    body = body.replace('"formId": ""', `"formId": "${document.getElementById('formId').value || ''}"`);
+                }
+            }
+
+            const methodClass = `method-${endpoint.method.toLowerCase()}`;
+            const html = `
+                <div class="endpoint-form">
+                    <div class="endpoint-header">
+                        <span class="method-badge ${methodClass}">${endpoint.method}</span>
+                        <span class="endpoint-title">${endpoint.title}</span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>URL</label>
+                        <input type="text" id="endpoint-url" value="${getBaseUrl()}${url}" readonly>
+                    </div>
+
+                    ${endpoint.isFileUpload ? `
+                        <div class="form-group">
+                            <label>Fichier</label>
+                            <input type="file" id="file-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Type de document</label>
+                            <input type="text" id="doc-type" value="CARTE_IDENTITE">
+                        </div>
+                        <div class="form-group">
+                            <label>Date de délivrance (DD/MM/YYYY)</label>
+                            <input type="text" id="issue-date" value="27/01/2022">
+                        </div>
+                        <div class="form-group">
+                            <label>Date d'expiration (DD/MM/YYYY)</label>
+                            <input type="text" id="expiration-date" value="27/12/2027">
+                        </div>
+                    ` : `
+                        <div class="form-group">
+                            <label>Body (JSON)</label>
+                            <textarea id="endpoint-body">${body}</textarea>
+                        </div>
+                    `}
+
+                    <button class="btn btn-primary" onclick="sendRequest('${endpointKey}')">
+                        <span id="send-btn-text">Envoyer la Requête</span>
+                        <span id="send-btn-loading" class="loading hidden"></span>
+                    </button>
+                </div>
+
+                <div id="response-area" class="response-area hidden">
+                    <div class="response-header">
+                        <h3>Réponse</h3>
+                        <span id="status-badge" class="status-badge"></span>
+                    </div>
+                    <div class="response-body" id="response-body"></div>
+                </div>
+            `;
+
+            document.getElementById('endpoint-content').innerHTML = html;
+        }
+
+        function getBaseUrl() {
+            return document.getElementById('baseUrl').value || baseUrl;
+        }
+
+        async function sendRequest(endpointKey) {
+            const endpoint = endpoints[endpointKey];
+            if (!endpoint) return;
+
+            const sendBtn = document.getElementById('send-btn-text');
+            const loadingBtn = document.getElementById('send-btn-loading');
+            const responseArea = document.getElementById('response-area');
+            const responseBody = document.getElementById('response-body');
+            const statusBadge = document.getElementById('status-badge');
+
+            // Show loading
+            sendBtn.classList.add('hidden');
+            loadingBtn.classList.remove('hidden');
+            responseArea.classList.add('hidden');
+
+            try {
+                // Get URL
+                let url = endpoint.url;
+                url = url.replace('{requestId}', document.getElementById('requestId').value || '{requestId}');
+                url = url.replace('{formId}', document.getElementById('formId').value || '{formId}');
+                url = url.replace('{organisationId}', document.getElementById('organisationId').value || '{organisationId}');
+                url = getBaseUrl() + url;
+
+                // Get token
+                const token = document.getElementById('jwtToken').value;
+                if (endpoint.requiresAuth && !token) {
+                    throw new Error('Token JWT requis. Connectez-vous d\'abord.');
+                }
+
+                // Prepare request
+                const options = {
+                    method: endpoint.method,
+                    headers: {}
+                };
+
+                if (endpoint.isFileUpload) {
+                    const formData = new FormData();
+                    const fileInput = document.getElementById('file-input');
+                    if (fileInput.files[0]) {
+                        formData.append('file', fileInput.files[0]);
+                    }
+                    formData.append('type', document.getElementById('doc-type').value);
+                    formData.append('issueDate', document.getElementById('issue-date').value);
+                    formData.append('expirationDate', document.getElementById('expiration-date').value);
+                    options.body = formData;
+                } else {
+                    options.headers['Content-Type'] = 'application/json';
+                    const bodyText = document.getElementById('endpoint-body').value;
+                    if (bodyText && endpoint.method !== 'GET') {
+                        options.body = bodyText;
+                    }
+                }
+
+                if (token) {
+                    options.headers['Authorization'] = `Bearer ${token}`;
+                }
+
+                // Send request
+                const response = await fetch(url, options);
+                const data = await response.json().catch(() => ({ message: 'Réponse non-JSON' }));
+
+                // Display response
+                responseArea.classList.remove('hidden');
+                statusBadge.textContent = `Status: ${response.status}`;
+                statusBadge.className = `status-badge ${response.ok ? 'status-success' : 'status-error'}`;
+                responseBody.textContent = JSON.stringify(data, null, 2);
+
+                // Save token if needed
+                if (endpoint.saveToken && data.accessToken) {
+                    document.getElementById('jwtToken').value = data.accessToken;
+                    if (data.refreshToken) {
+                        // Save refresh token if needed
+                    }
+                }
+
+                // Save user ID
+                if (data.user && data.user.id) {
+                    document.getElementById('userId').value = data.user.id;
+                }
+
+                // Save IDs
+                if (endpoint.saveId && data[endpoint.saveId]) {
+                    document.getElementById(endpoint.saveId).value = data[endpoint.saveId];
+                } else if (data.id) {
+                    // Try to save ID based on endpoint
+                    if (endpointKey.includes('form')) {
+                        document.getElementById('formId').value = data.id;
+                    } else if (endpointKey.includes('request')) {
+                        document.getElementById('requestId').value = data.id;
+                    }
+                }
+
+            } catch (error) {
+                responseArea.classList.remove('hidden');
+                statusBadge.textContent = 'Erreur';
+                statusBadge.className = 'status-badge status-error';
+                responseBody.textContent = `Erreur: ${error.message}`;
+            } finally {
+                sendBtn.classList.remove('hidden');
+                loadingBtn.classList.add('hidden');
+            }
+        }
+
+        function copyToken() {
+            const tokenInput = document.getElementById('jwtToken');
+            tokenInput.select();
+            document.execCommand('copy');
+            alert('Token copié !');
+        }
+
+        // Auto-update URLs when variables change
+        document.getElementById('baseUrl').addEventListener('change', () => {
+            if (currentEndpoint) {
+                loadEndpoint(currentEndpoint);
+            }
+        });
+
+        document.getElementById('organisationId').addEventListener('change', () => {
+            if (currentEndpoint) {
+                loadEndpoint(currentEndpoint);
+            }
+        });
+
+        document.getElementById('formId').addEventListener('change', () => {
+            if (currentEndpoint) {
+                loadEndpoint(currentEndpoint);
+            }
+        });
+
+        document.getElementById('requestId').addEventListener('change', () => {
+            if (currentEndpoint) {
+                loadEndpoint(currentEndpoint);
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
