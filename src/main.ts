@@ -81,8 +81,9 @@ async function bootstrap() {
     }),
   );
 
-  // ========== SÉCURITÉ : Swagger uniquement en développement ==========
-  if (!isProduction) {
+  // ========== Swagger : en dev toujours, en prod si ENABLE_SWAGGER=true ==========
+  const enableSwagger = !isProduction || process.env.ENABLE_SWAGGER === 'true';
+  if (enableSwagger) {
     const config = new DocumentBuilder()
       .setTitle('Secure Link API')
       .setDescription(`
@@ -126,7 +127,7 @@ async function bootstrap() {
     SwaggerModule.setup('api', app, document);
     logger.log('  Swagger documentation disponible sur /api');
   } else {
-    logger.warn('  Swagger désactivé en production pour des raisons de sécurité');
+    logger.warn('  Swagger désactivé (en prod : définir ENABLE_SWAGGER=true pour l’activer)');
   }
 
   const port = process.env.PORT || 3000;

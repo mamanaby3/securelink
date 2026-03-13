@@ -33,6 +33,8 @@ services:
       # Application
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
+      # Définir ENABLE_SWAGGER=true pour afficher la doc Swagger en prod (ex. https://api.../api)
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-}
       
       # Database
       DB_HOST: postgres
