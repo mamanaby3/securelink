@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { CreateFormDto } from './dto/create-form.dto';
@@ -16,6 +16,8 @@ import { PDFDocument, rgb } from 'pdf-lib';
 
 @Injectable()
 export class FormsService {
+    private readonly logger = new Logger(FormsService.name);
+
     constructor(
         @InjectRepository(Form)
         private formRepository: Repository<Form>,
@@ -111,7 +113,12 @@ export class FormsService {
         };
     }
 
-    async create(createFormDto: CreateFormDto, pdfFile?: { buffer: Buffer; originalname: string; mimetype: string; size: number }): Promise<any> {
+    async create(
+        createFormDto: CreateFormDto,
+        pdfFile?: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+        attachmentFiles?: { buffer: Buffer; originalname: string; mimetype: string; size: number }[],
+        labels?: string[],
+    ): Promise<any> {
         // Vérifier que l'organisation existe et est active
         const organisation = await this.organisationRepository.findOne({
             where: { id: createFormDto.organisationId },
@@ -198,43 +205,68 @@ export class FormsService {
             editableFields: [],
             status: FormStatus.DRAFT, // Par défaut DRAFT, l'organisation le mettra ONLINE/OFFLINE
             isActive: false, // Par défaut inactif, l'admin l'activera
+            attachments: [],
         });
 
         const savedForm = await this.formRepository.save(newForm);
 
-        // Si un PDF est fourni, le traiter et extraire les champs
+        // --- Enregistrement des modèles PDF (table + MinIO) ---
+        // Un formulaire peut avoir 1 PDF principal (template) + N PDF annexes (attachments).
+        // Template : colonnes pdfFilePath, pdfFileName en base + fichier dans MinIO (forms/form-{id}-...).
+        // Attachments : tableau JSON en base (label, filePath, fileName, url optionnel) + chaque fichier dans MinIO (forms/attachments/...).
+        // Les URLs présignées (pdfTemplate, url) peuvent expirer ; on régénère à la volée via getFormPdfOptions avec filePath/fileName.
+
         let extractedFields: any[] = [];
         if (pdfFile) {
-            // Vérifier le type de fichier
             if (pdfFile.mimetype !== 'application/pdf') {
                 throw new BadRequestException('Le fichier doit être un PDF');
             }
-
-            // Vérifier la taille (max 10 MB)
             const maxSize = 10 * 1024 * 1024; // 10 MB
             if (pdfFile.size > maxSize) {
                 throw new BadRequestException('Le fichier PDF est trop volumineux (max 10 MB)');
             }
-
-            // Générer un nom de fichier unique
             const fileExtension = path.extname(pdfFile.originalname);
             const minioFileName = `forms/form-${savedForm.id}-${Date.now()}${fileExtension}`;
 
-            // Uploader le fichier vers MinIO
             await this.minioService.uploadFile(minioFileName, pdfFile.buffer, 'application/pdf');
-
-            // Extraire les champs du PDF
             extractedFields = await this.extractPdfFields(pdfFile.buffer);
-
-            // Générer une URL présignée pour le fichier (valide 7 jours)
             const presignedUrl = await this.minioService.getPresignedUrl(minioFileName);
 
-            // Mettre à jour le formulaire avec le PDF et les champs extraits
-            savedForm.pdfFilePath = minioFileName; // Stocker le nom du fichier MinIO
+            savedForm.pdfFilePath = minioFileName;
             savedForm.pdfFileName = pdfFile.originalname;
-            savedForm.pdfTemplate = presignedUrl; // Stocker l'URL présignée
+            savedForm.pdfTemplate = presignedUrl;
             savedForm.editableFields = extractedFields;
+            await this.formRepository.save(savedForm);
+        }
 
+        if (attachmentFiles && attachmentFiles.length > 0) {
+            const safeLabels = Array.isArray(labels) && labels.length === attachmentFiles.length
+                ? labels
+                : attachmentFiles.map(() => 'Pièce jointe');
+            const maxSize = 10 * 1024 * 1024; // 10 MB
+            for (let i = 0; i < attachmentFiles.length; i++) {
+                const file = attachmentFiles[i];
+                if (file.mimetype !== 'application/pdf') {
+                    throw new BadRequestException('Toutes les pièces jointes doivent être au format PDF');
+                }
+                if (file.size > maxSize) {
+                    throw new BadRequestException('Une pièce jointe est trop volumineuse (max 10 MB)');
+                }
+                const fileExtension = path.extname(file.originalname);
+                const minioFileName = `forms/attachments/form-${savedForm.id}-${Date.now()}-${i}${fileExtension}`;
+                await this.minioService.uploadFile(minioFileName, file.buffer, 'application/pdf');
+                const presignedUrl = await this.minioService.getPresignedUrl(minioFileName);
+                const existingAttachments = Array.isArray(savedForm.attachments) ? savedForm.attachments : [];
+                savedForm.attachments = [
+                    ...existingAttachments,
+                    {
+                        label: safeLabels[i],
+                        filePath: minioFileName,
+                        fileName: file.originalname,
+                        url: presignedUrl,
+                    },
+                ];
+            }
             await this.formRepository.save(savedForm);
         }
 
@@ -281,6 +313,7 @@ export class FormsService {
             pdfFilePath: formWithRelations.pdfFilePath,
             pdfFileName: formWithRelations.pdfFileName,
             pdfTemplate: formWithRelations.pdfTemplate, // URL présignée pour accéder au PDF
+            attachments: formWithRelations.attachments || [],
             createdAt: formWithRelations.createdAt,
             updatedAt: formWithRelations.updatedAt,
         };
@@ -469,6 +502,79 @@ export class FormsService {
         return form;
     }
 
+    /**
+     * Détail d’un formulaire pour le client (étape 3 « Documents »).
+     * Retourne le formulaire avec requiredDocumentsDetails (id + title) pour afficher les pièces justificatives.
+     */
+    async getDetail(id: string) {
+        const form = await this.findOne(id);
+        let requiredDocumentsDetails: Array<{ id: string; title?: string }> = [];
+        if (form.requiredDocuments && form.requiredDocuments.length > 0) {
+            const docTypes = await this.documentTypeRepository.find({
+                where: { id: In(form.requiredDocuments) },
+            });
+            requiredDocumentsDetails = docTypes.map((d) => ({ id: d.id, title: d.title }));
+        }
+        return {
+            ...form,
+            requiredDocumentsDetails,
+        };
+    }
+
+    /**
+     * Retourne la liste des PDFs du formulaire (modèle + annexes) avec URLs présignées à jour.
+     * Utilisé par le client pour choisir un PDF à ouvrir dans l’éditeur (ex. solimus-pdf).
+     */
+    async getFormPdfOptions(formId: string): Promise<{
+        template?: { label: string; url: string };
+        attachments: Array<{ label: string; url: string }>;
+        all: Array<{ label: string; url: string }>;
+    }> {
+        const form = await this.findOne(formId);
+        const attachments: Array<{ label: string; url: string }> = [];
+        let template: { label: string; url: string } | undefined;
+
+        if (form.pdfFilePath && form.pdfFilePath.startsWith('forms/')) {
+            try {
+                const exists = await this.minioService.fileExists(form.pdfFilePath);
+                if (exists) {
+                    const url = await this.minioService.getPresignedUrl(form.pdfFilePath);
+                    template = { label: 'Modèle principal', url };
+                } else {
+                    template = { label: 'Modèle principal', url: '' };
+                }
+            } catch (e) {
+                this.logger.warn(`getFormPdfOptions: MinIO indisponible ou fichier absent pour template (${form.pdfFilePath}): ${e?.message || e}`);
+                template = { label: 'Modèle principal', url: '' };
+            }
+        }
+
+        const list = form.attachments || [];
+        for (const att of list) {
+            const label = att.label || att.fileName || 'PDF';
+            if (att.filePath && att.filePath.startsWith('forms/')) {
+                try {
+                    const exists = await this.minioService.fileExists(att.filePath);
+                    if (exists) {
+                        const url = await this.minioService.getPresignedUrl(att.filePath);
+                        attachments.push({ label, url });
+                    } else {
+                        attachments.push({ label, url: '' });
+                    }
+                } catch (e) {
+                    this.logger.warn(`getFormPdfOptions: MinIO indisponible ou fichier absent pour annexe (${att.filePath}): ${e?.message || e}`);
+                    attachments.push({ label, url: '' });
+                }
+            }
+        }
+
+        const all: Array<{ label: string; url: string }> = [];
+        if (template) all.push(template);
+        all.push(...attachments);
+
+        return { template, attachments, all };
+    }
+
     async findByOrganisation(organisationId: string): Promise<Form[]> {
         return await this.formRepository.find({
             where: { organisationId },
@@ -516,6 +622,11 @@ export class FormsService {
     ): Promise<Form> {
         const form = await this.findOne(id);
 
+        // Empêcher la modification d'un formulaire en ligne (formulaire de base figé)
+        if (form.status === FormStatus.ONLINE) {
+            throw new BadRequestException('Impossible de modifier un formulaire déjà en ligne. Créez une nouvelle version du formulaire.');
+        }
+
         // Si des champs modifiables sont fournis et qu'un PDF existe, mettre à jour le PDF
         if (updateFieldsDto.editableFields !== undefined && form.pdfFilePath) {
             try {
@@ -559,6 +670,60 @@ export class FormsService {
         }
 
         return await this.formRepository.save(form);
+    }
+
+    async addAttachments(
+        formId: string,
+        files: { buffer: Buffer; originalname: string; mimetype: string; size: number }[],
+        labels: string[],
+    ): Promise<Form> {
+        const form = await this.findOne(formId);
+
+        if (form.status === FormStatus.ONLINE) {
+            throw new BadRequestException('Impossible d\'ajouter des pièces jointes à un formulaire déjà en ligne. Créez une nouvelle version du formulaire.');
+        }
+
+        if (!files || files.length === 0) {
+            throw new BadRequestException('Aucun fichier fourni');
+        }
+
+        const safeLabels =
+            Array.isArray(labels) && labels.length === files.length
+                ? labels
+                : files.map(() => 'Pièce jointe');
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const label = safeLabels[i];
+
+            if (file.mimetype !== 'application/pdf') {
+                throw new BadRequestException('Toutes les pièces jointes doivent être au format PDF');
+            }
+
+            const maxSize = 10 * 1024 * 1024; // 10 MB
+            if (file.size > maxSize) {
+                throw new BadRequestException('Une pièce jointe est trop volumineuse (max 10 MB)');
+            }
+
+            const fileExtension = path.extname(file.originalname);
+            const minioFileName = `forms/attachments/form-${formId}-${Date.now()}-${i}${fileExtension}`;
+
+            await this.minioService.uploadFile(minioFileName, file.buffer, 'application/pdf');
+            const presignedUrl = await this.minioService.getPresignedUrl(minioFileName);
+
+            const existingAttachments = Array.isArray(form.attachments) ? form.attachments : [];
+            form.attachments = [
+                ...existingAttachments,
+                {
+                    label,
+                    filePath: minioFileName,
+                    fileName: file.originalname,
+                    url: presignedUrl,
+                },
+            ];
+        }
+
+        return this.formRepository.save(form);
     }
 
     /**

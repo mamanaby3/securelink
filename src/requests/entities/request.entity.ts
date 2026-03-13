@@ -100,6 +100,14 @@ export class Request {
   formData?: any;
 
   @Column({ type: 'jsonb', nullable: true })
+  formSchemaSnapshot?: {
+    formId: string;
+    name: string;
+    version: string;
+    editableFields?: any[];
+  };
+
+  @Column({ type: 'jsonb', nullable: true })
   submittedForm?: {
     pdfUrl?: string;
     version: string;

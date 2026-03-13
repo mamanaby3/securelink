@@ -20,6 +20,7 @@ import { RegisterClientStep1Dto } from './dto/register-client-step1.dto';
 import { RegisterClientStep2Dto } from './dto/register-client-step2.dto';
 import { RegisterClientStep2DataDto } from './dto/register-client-step2-data.dto';
 import { RegisterClientStep3Dto } from './dto/register-client-step3.dto';
+import { SetupPasswordDto } from './dto/setup-password.dto';
 import { User } from './entities/user.entity';
 import { Organisation } from '../organisations/entities/organisation.entity';
 import { Request, RequestStatus } from '../requests/entities/request.entity';
@@ -27,6 +28,7 @@ import { JwtPayload } from './strategies/jwt.strategy';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuditAction, AuditStatus } from '../audit-logs/entities/audit-log.entity';
 import { EmailService } from '../common/services/email.service';
+import { SmsService } from '../common/services/sms.service';
 import { Logger } from '@nestjs/common';
 import { SecurityService } from '../security/security.service';
 
@@ -36,7 +38,8 @@ export class AuthService {
   private resetTokens: Map<string, { email: string; expiry: Date }> = new Map();
   private otpCodes: Map<string, { code: string; email: string; expiry: Date; verified: boolean }> = new Map();
   private loginAttempts: Map<string, { count: number; lastAttempt: Date }> = new Map();
-  private registrationSessions: Map<string, { step1: any; step2: any; expiry: Date }> = new Map();
+  private registrationSessions: Map<string, { step1: any; otp?: string; otpExpiry?: Date; otpVerified?: boolean; expiry: Date }> = new Map();
+  private passwordSetupTokens: Map<string, { userId: string; email: string; expiry: Date }> = new Map();
   private readonly MAX_LOGIN_ATTEMPTS = 5;
   private readonly LOCKOUT_DURATION = 15 * 60 * 1000; // 15 minutes
   private readonly OTP_EXPIRATION = 10 * 60 * 1000; // 10 minutes
@@ -54,6 +57,7 @@ export class AuthService {
     private configService: ConfigService,
     private auditLogsService: AuditLogsService,
     private emailService: EmailService,
+    private smsService: SmsService,
     private securityService: SecurityService,
   ) {
     // Créer un utilisateur admin par défaut si aucun n'existe
@@ -149,6 +153,10 @@ export class AuthService {
     }
 
     if (!user.isActive) {
+      // Vérifier si le compte est en attente de création de mot de passe
+      if (user.passwordSetupToken) {
+        throw new UnauthorizedException('Votre compte est en attente de création de mot de passe. Veuillez vérifier votre email pour le lien de création de mot de passe.');
+      }
       throw new UnauthorizedException('Votre compte est désactivé');
     }
 
@@ -194,6 +202,10 @@ export class AuthService {
     }
 
     if (!user.isActive) {
+      // Vérifier si le compte est en attente de création de mot de passe
+      if (user.passwordSetupToken) {
+        throw new UnauthorizedException('Votre compte est en attente de création de mot de passe. Veuillez vérifier votre email pour le lien de création de mot de passe.');
+      }
       throw new UnauthorizedException('Votre compte est désactivé');
     }
 
@@ -1075,35 +1087,115 @@ export class AuthService {
     return `session-${Date.now()}-${Math.random().toString(36).substring(7)}`;
   }
 
+  /**
+   * Lien web envoyé par email : {FRONTEND_URL}/auth/setup-password?token=xxx
+   */
+  private getPasswordSetupLink(token: string): string {
+    const frontendUrl = this.configService.get<string>(
+      'FRONTEND_URL',
+      'http://localhost:4200',
+    );
+    return `${frontendUrl.replace(/\/$/, '')}/auth/setup-password?token=${token}`;
+  }
+
+  /**
+   * Lien deep link mobile (optionnel) : securelink://create-password?token=xxx
+   * Définir MOBILE_DEEP_LINK_URL dans .env (ex: securelink://create-password?token=).
+   */
+  private getPasswordSetupLinkMobile(token: string): string | null {
+    const base = this.configService.get<string>('MOBILE_DEEP_LINK_URL', '');
+    if (!base || typeof base !== 'string') return null;
+    const encoded = encodeURIComponent(token);
+    if (base.endsWith('?token=')) return base + encoded;
+    return base + (base.includes('?') ? '&' : '?') + 'token=' + encoded;
+  }
+
   async registerClientStep1(step1Dto: RegisterClientStep1Dto, ipAddress?: string) {
     // Vérifier si l'email existe déjà
-    const existingUser = await this.userRepository.findOne({
+    const existingByEmail = await this.userRepository.findOne({
       where: { email: step1Dto.email },
     });
-    if (existingUser) {
+    if (existingByEmail) {
       throw new ConflictException('Cet email est déjà utilisé');
+    }
+
+    // Vérifier si le numéro de téléphone est déjà utilisé (unique par compte)
+    const existingByPhone = await this.userRepository.findOne({
+      where: { phone: step1Dto.phone },
+    });
+    if (existingByPhone) {
+      throw new ConflictException('Ce numéro de téléphone est déjà utilisé');
     }
 
     // Générer un token de session
     const sessionToken = this.generateSessionToken();
     const expiry = new Date(Date.now() + this.REGISTRATION_SESSION_EXPIRATION);
 
-    // Stocker les données de l'étape 1
+    // Générer un code OTP
+    const otp = this.generateOTP();
+    const otpExpiry = new Date(Date.now() + this.OTP_EXPIRATION);
+
+    // Convertir la date de naissance de jj/mm/aaaa en Date
+    const [day, month, year] = step1Dto.dateOfBirth.split('/');
+    const dateOfBirth = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+
+    // Stocker toutes les données de l'étape 1 et l'OTP
     this.registrationSessions.set(sessionToken, {
-      step1: step1Dto,
-      step2: null,
+      step1: {
+        ...step1Dto,
+        dateOfBirth, // Date convertie
+      },
+      otp,
+      otpExpiry,
+      otpVerified: false,
       expiry,
     });
 
+    // Stocker l'OTP pour la vérification
+    this.otpCodes.set(step1Dto.email, {
+      code: otp,
+      email: step1Dto.email,
+      expiry: otpExpiry,
+      verified: false,
+    });
+
+    // Envoyer l'OTP par email
+    try {
+      await this.emailService.sendRegistrationOtpEmail(
+        step1Dto.email,
+        otp,
+        `${step1Dto.firstName} ${step1Dto.lastName}`,
+      );
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email OTP: ${error.message}`);
+      console.log(`[DEV] Code OTP d'inscription pour ${step1Dto.email}: ${otp}`);
+    }
+
+    // Envoyer l'OTP par SMS si le téléphone est fourni
+    if (step1Dto.phone) {
+      try {
+        await this.smsService.sendOtpSms(
+          step1Dto.phone,
+          otp,
+          'Votre code de vérification pour finaliser votre inscription sur Secure Link.',
+        );
+      } catch (error) {
+        this.logger.error(`Erreur lors de l'envoi du SMS OTP: ${error.message}`);
+        // Ne pas faire échouer l'inscription si le SMS échoue
+      }
+    }
+
     return {
-      message: 'Étape 1 complétée avec succès',
+      message: 'Code OTP envoyé par email et SMS',
       sessionToken,
       expiresIn: '30 minutes',
-      nextStep: 'step2',
+      otpExpiresIn: '10 minutes',
+      nextStep: 'verify-otp',
+      ...(process.env.NODE_ENV === 'development' && { otp }), // Uniquement en développement
     };
   }
 
-  async registerClientStep2(sessionToken: string, step2Dto: RegisterClientStep2DataDto) {
+  async verifyRegistrationOtp(sessionToken: string, otp: string) {
     // Vérifier la session
     const session = this.registrationSessions.get(sessionToken);
     if (!session) {
@@ -1119,21 +1211,179 @@ export class AuthService {
       throw new BadRequestException('Étape 1 non complétée. Veuillez recommencer l\'inscription.');
     }
 
-    // Convertir la date de naissance de jj/mm/aaaa en Date
-    const [day, month, year] = step2Dto.dateOfBirth.split('/');
-    const dateOfBirth = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    // Vérifier l'OTP
+    if (!session.otp || !session.otpExpiry) {
+      throw new BadRequestException('Aucun code OTP trouvé. Veuillez recommencer l\'inscription.');
+    }
 
-    // Mettre à jour la session avec les données de l'étape 2
-    session.step2 = {
-      ...step2Dto,
-      dateOfBirth,
-    };
-    this.registrationSessions.set(sessionToken, session);
+    if (session.otpExpiry < new Date()) {
+      this.registrationSessions.delete(sessionToken);
+      throw new BadRequestException('Le code OTP a expiré. Veuillez recommencer l\'inscription.');
+    }
+
+    if (session.otp !== otp) {
+      throw new BadRequestException('Code OTP incorrect');
+    }
+
+    // Vérifier à nouveau si l'email existe (au cas où il aurait été créé entre-temps)
+    const existingUser = await this.userRepository.findOne({
+      where: { email: session.step1.email },
+    });
+    if (existingUser) {
+      this.registrationSessions.delete(sessionToken);
+      throw new ConflictException('Cet email est déjà utilisé');
+    }
+
+    // Générer un token de création de mot de passe
+    const passwordSetupToken = `pwd-setup-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const passwordSetupTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 heures
+
+    // Créer le compte avec statut PENDING_PASSWORD (isActive: false)
+    // Utiliser un mot de passe temporaire qui sera remplacé lors de la création du mot de passe
+    const temporaryPassword = `temp-${Math.random().toString(36).substring(7)}-${Date.now()}`;
+    const hashedTemporaryPassword = await bcrypt.hash(temporaryPassword, 12);
+
+    const newUser = this.userRepository.create({
+      name: `${session.step1.firstName} ${session.step1.lastName}`,
+      firstName: session.step1.firstName,
+      lastName: session.step1.lastName,
+      email: session.step1.email,
+      password: hashedTemporaryPassword, // Mot de passe temporaire
+      phone: session.step1.phone,
+      address: session.step1.address,
+      dateOfBirth: session.step1.dateOfBirth,
+      gender: session.step1.gender,
+      maritalStatus: session.step1.maritalStatus,
+      role: UserRole.CLIENT,
+      isActive: false, // Compte non actif jusqu'à la création du mot de passe
+      isEmailVerified: true, // Email vérifié via OTP
+      passwordSetupToken,
+      passwordSetupTokenExpiry,
+    });
+
+    await this.userRepository.save(newUser);
+
+    // Stocker le token pour la création du mot de passe
+    this.passwordSetupTokens.set(passwordSetupToken, {
+      userId: newUser.id,
+      email: newUser.email,
+      expiry: passwordSetupTokenExpiry,
+    });
+
+    // Envoyer l'email avec le lien web + deep link mobile (si MOBILE_DEEP_LINK_URL est défini)
+    try {
+      const passwordSetupLink = this.getPasswordSetupLink(passwordSetupToken);
+      const passwordSetupLinkMobile = this.getPasswordSetupLinkMobile(passwordSetupToken);
+      await this.emailService.sendPasswordSetupEmail(
+        newUser.email,
+        newUser.name,
+        passwordSetupLink,
+        passwordSetupLinkMobile,
+      );
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email de création de mot de passe: ${error.message}`);
+      // Ne pas faire échouer l'inscription, mais logger l'erreur
+    }
+
+    // Supprimer la session
+    this.registrationSessions.delete(sessionToken);
 
     return {
-      message: 'Étape 2 complétée avec succès',
-      sessionToken,
-      nextStep: 'step3',
+      message: 'Code OTP vérifié avec succès. Votre compte a été créé. Un lien de création de mot de passe a été envoyé à votre adresse email.',
+      email: newUser.email,
+      verified: true,
+      nextStep: 'setup-password',
+    };
+  }
+
+  async registerClientStep2(sessionToken: string) {
+    // Vérifier la session
+    const session = this.registrationSessions.get(sessionToken);
+    if (!session) {
+      throw new BadRequestException('Session invalide ou expirée. Veuillez recommencer l\'inscription.');
+    }
+
+    if (session.expiry < new Date()) {
+      this.registrationSessions.delete(sessionToken);
+      throw new BadRequestException('Session expirée. Veuillez recommencer l\'inscription.');
+    }
+
+    if (!session.step1) {
+      throw new BadRequestException('Étape 1 non complétée. Veuillez recommencer l\'inscription.');
+    }
+
+    // Vérifier que l'OTP a été vérifié
+    if (!session.otpVerified) {
+      throw new BadRequestException('Le code OTP doit être vérifié avant de continuer. Veuillez d\'abord vérifier votre code OTP.');
+    }
+
+    // Vérifier à nouveau si l'email existe (au cas où il aurait été créé entre-temps)
+    const existingUser = await this.userRepository.findOne({
+      where: { email: session.step1.email },
+    });
+    if (existingUser) {
+      this.registrationSessions.delete(sessionToken);
+      throw new ConflictException('Cet email est déjà utilisé');
+    }
+
+    // Générer un token de création de mot de passe
+    const passwordSetupToken = `pwd-setup-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const passwordSetupTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 heures
+
+    // Créer le compte avec statut PENDING_PASSWORD (isActive: false)
+    // Utiliser un mot de passe temporaire qui sera remplacé lors de la création du mot de passe
+    const temporaryPassword = `temp-${Math.random().toString(36).substring(7)}-${Date.now()}`;
+    const hashedTemporaryPassword = await bcrypt.hash(temporaryPassword, 12);
+
+    const newUser = this.userRepository.create({
+      name: `${session.step1.firstName} ${session.step1.lastName}`,
+      firstName: session.step1.firstName,
+      lastName: session.step1.lastName,
+      email: session.step1.email,
+      password: hashedTemporaryPassword, // Mot de passe temporaire
+      phone: session.step1.phone,
+      address: session.step1.address,
+      dateOfBirth: session.step1.dateOfBirth,
+      gender: session.step1.gender,
+      maritalStatus: session.step1.maritalStatus,
+      role: UserRole.CLIENT,
+      isActive: false, // Compte non actif jusqu'à la création du mot de passe
+      isEmailVerified: true, // Email vérifié via OTP
+      passwordSetupToken,
+      passwordSetupTokenExpiry,
+    });
+
+    await this.userRepository.save(newUser);
+
+    // Stocker le token pour la création du mot de passe
+    this.passwordSetupTokens.set(passwordSetupToken, {
+      userId: newUser.id,
+      email: newUser.email,
+      expiry: passwordSetupTokenExpiry,
+    });
+
+    // Envoyer l'email avec le lien web + deep link mobile (si MOBILE_DEEP_LINK_URL est défini)
+    try {
+      const passwordSetupLink = this.getPasswordSetupLink(passwordSetupToken);
+      const passwordSetupLinkMobile = this.getPasswordSetupLinkMobile(passwordSetupToken);
+      await this.emailService.sendPasswordSetupEmail(
+        newUser.email,
+        newUser.name,
+        passwordSetupLink,
+        passwordSetupLinkMobile,
+      );
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email de création de mot de passe: ${error.message}`);
+      // Ne pas faire échouer l'inscription, mais logger l'erreur
+    }
+
+    // Supprimer la session
+    this.registrationSessions.delete(sessionToken);
+
+    return {
+      message: 'Inscription validée. Un lien de création de mot de passe a été envoyé à votre adresse email.',
+      email: newUser.email,
+      nextStep: 'setup-password',
     };
   }
 
@@ -1149,8 +1399,8 @@ export class AuthService {
       throw new BadRequestException('Session expirée. Veuillez recommencer l\'inscription.');
     }
 
-    if (!session.step1 || !session.step2) {
-      throw new BadRequestException('Étapes précédentes non complétées. Veuillez recommencer l\'inscription.');
+    if (!session.step1) {
+      throw new BadRequestException('Étape 1 non complétée. Veuillez recommencer l\'inscription.');
     }
 
     // Vérifier l'acceptation des conditions
@@ -1183,10 +1433,10 @@ export class AuthService {
       email: session.step1.email,
       password: hashedPassword,
       phone: session.step1.phone,
-      address: session.step2.address,
-      dateOfBirth: session.step2.dateOfBirth,
-      gender: session.step2.gender,
-      maritalStatus: session.step2.maritalStatus,
+      address: session.step1.address,
+      dateOfBirth: session.step1.dateOfBirth,
+      gender: session.step1.gender,
+      maritalStatus: session.step1.maritalStatus,
       role: UserRole.CLIENT,
       isActive: true,
       isEmailVerified: false,
@@ -1250,6 +1500,198 @@ export class AuthService {
         isActive: newUser.isActive,
         isEmailVerified: newUser.isEmailVerified,
       },
+    };
+  }
+
+  async setupPassword(setupPasswordDto: SetupPasswordDto, ipAddress?: string) {
+    // Vérifier que les mots de passe correspondent
+    if (setupPasswordDto.password !== setupPasswordDto.confirmPassword) {
+      throw new BadRequestException('Les mots de passe ne correspondent pas');
+    }
+
+    // Vérifier le token
+    const tokenData = this.passwordSetupTokens.get(setupPasswordDto.token);
+    if (!tokenData || tokenData.expiry < new Date()) {
+      throw new BadRequestException('Token de création de mot de passe invalide ou expiré');
+    }
+
+    // Trouver l'utilisateur
+    const user = await this.userRepository.findOne({
+      where: { id: tokenData.userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+
+    // Vérifier que le token correspond à celui stocké dans la base de données
+    if (user.passwordSetupToken !== setupPasswordDto.token) {
+      throw new BadRequestException('Token de création de mot de passe invalide');
+    }
+
+    if (user.passwordSetupTokenExpiry && user.passwordSetupTokenExpiry < new Date()) {
+      throw new BadRequestException('Token de création de mot de passe expiré');
+    }
+
+    // Hasher le nouveau mot de passe
+    const hashedPassword = await bcrypt.hash(setupPasswordDto.password, 12);
+
+    // Mettre à jour le mot de passe et activer le compte
+    user.password = hashedPassword;
+    user.isActive = true;
+    user.passwordSetupToken = null;
+    user.passwordSetupTokenExpiry = null;
+    await this.userRepository.save(user);
+
+    // Supprimer le token utilisé
+    this.passwordSetupTokens.delete(setupPasswordDto.token);
+
+    // Générer les tokens JWT
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      type: user.type,
+      organisationId: user.organisationId,
+      organisationRole: user.organisationRole,
+    };
+
+    // Utiliser l'expiration configurée par l'admin ou la valeur par défaut
+    const sessionExpirationMs = await this.securityService.getSessionExpirationMs();
+    const sessionExpirationMinutes = sessionExpirationMs / (60 * 1000);
+    const expiresIn = `${Math.round(sessionExpirationMinutes)}m`;
+
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn,
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      expiresIn: this.configService.get('JWT_REFRESH_EXPIRATION', '7d'),
+    });
+
+    user.refreshToken = refreshToken;
+    user.refreshTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await this.userRepository.save(user);
+
+    // Logger la création du mot de passe
+    await this.logAuditEvent(
+      AuditAction.CONNEXION_REUSSIE,
+      'Création de mot de passe et activation du compte',
+      AuditStatus.SUCCES,
+      user.id,
+      user.name,
+      ipAddress,
+      { action: 'PASSWORD_SETUP' },
+    );
+
+    return {
+      message: 'Mot de passe créé avec succès. Votre compte est maintenant actif.',
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isActive: user.isActive,
+        isEmailVerified: user.isEmailVerified,
+      },
+    };
+  }
+
+  async resendPasswordSetupLink(email: string, ipAddress?: string) {
+    const user = await this.userRepository.findOne({
+      where: { email },
+    });
+
+    if (!user) {
+      // Ne pas révéler si l'email existe ou non pour la sécurité
+      return {
+        message: 'Si cet email existe et que votre compte est en attente de création de mot de passe, un nouveau lien a été envoyé',
+      };
+    }
+
+    // Vérifier que le compte est en attente de création de mot de passe
+    if (!user.passwordSetupToken || user.isActive) {
+      throw new BadRequestException('Ce compte n\'est pas en attente de création de mot de passe');
+    }
+
+    // Vérifier que le token n'est pas expiré
+    if (user.passwordSetupTokenExpiry && user.passwordSetupTokenExpiry < new Date()) {
+      // Générer un nouveau token
+      const passwordSetupToken = `pwd-setup-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const passwordSetupTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 heures
+
+      user.passwordSetupToken = passwordSetupToken;
+      user.passwordSetupTokenExpiry = passwordSetupTokenExpiry;
+      await this.userRepository.save(user);
+
+      // Mettre à jour le token dans la map
+      this.passwordSetupTokens.set(passwordSetupToken, {
+        userId: user.id,
+        email: user.email,
+        expiry: passwordSetupTokenExpiry,
+      });
+    }
+
+    // Envoyer l'email avec le lien web + deep link mobile (si MOBILE_DEEP_LINK_URL est défini)
+    try {
+      const passwordSetupLink = this.getPasswordSetupLink(user.passwordSetupToken);
+      const passwordSetupLinkMobile = this.getPasswordSetupLinkMobile(user.passwordSetupToken);
+      await this.emailService.sendPasswordSetupEmail(
+        user.email,
+        user.name,
+        passwordSetupLink,
+        passwordSetupLinkMobile,
+      );
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email de création de mot de passe: ${error.message}`);
+      throw new Error('Erreur lors de l\'envoi de l\'email. Veuillez réessayer plus tard.');
+    }
+
+    return {
+      message: 'Un nouveau lien de création de mot de passe a été envoyé à votre adresse email',
+    };
+  }
+
+  async verifyPasswordSetupToken(token: string) {
+    // Vérifier le token dans la map
+    const tokenData = this.passwordSetupTokens.get(token);
+    if (!tokenData || tokenData.expiry < new Date()) {
+      throw new BadRequestException('Token de création de mot de passe invalide ou expiré');
+    }
+
+    // Vérifier dans la base de données
+    const user = await this.userRepository.findOne({
+      where: { id: tokenData.userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+
+    // Vérifier que le token correspond à celui stocké dans la base de données
+    if (user.passwordSetupToken !== token) {
+      throw new BadRequestException('Token de création de mot de passe invalide');
+    }
+
+    if (user.passwordSetupTokenExpiry && user.passwordSetupTokenExpiry < new Date()) {
+      throw new BadRequestException('Token de création de mot de passe expiré');
+    }
+
+    // Vérifier que le compte est bien en attente
+    if (user.isActive) {
+      throw new BadRequestException('Ce compte est déjà actif. Le mot de passe a déjà été créé.');
+    }
+
+    return {
+      valid: true,
+      email: user.email,
+      userName: user.name,
+      message: 'Token valide. Vous pouvez maintenant créer votre mot de passe.',
     };
   }
 }

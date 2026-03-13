@@ -104,6 +104,11 @@ async function bootstrap() {
       .addTag('Clients', 'Endpoints spécifiques aux clients')
       .addTag('Organisations', 'Endpoints pour les organisations')
       .addTag('Admin', 'Endpoints réservés aux administrateurs')
+      .addTag('Formulaires (Admin)', `**Création de formulaire**
+
+- **Un seul endpoint pour créer :** \`POST /forms\` (multipart) — envoie en une fois : name, version, sectorId, formTypeId, organisationId, description, requiredDocuments, **pdfFile** (modèle), **attachmentFiles** (PDFs annexes), **labels** (ex. Contrat, Renseignements).
+- **Options (listes) :** \`GET /forms/create-options\` pour secteurs, types, organisations, documentTypes.
+- **Ensuite :** \`PATCH /forms/:id/fields\` pour ajuster les champs, \`PATCH /forms/:id/activate\` (admin), puis \`PATCH /forms/:id/status\` (organisation, ONLINE/OFFLINE). Une fois **ONLINE**, le formulaire est figé.`)
       .addBearerAuth(
         {
           type: 'http',

@@ -4,10 +4,12 @@ import {
     Get,
     Body,
     Param,
+    Query,
     UseGuards,
     HttpCode,
     HttpStatus,
     Req,
+    BadRequestException,
 } from '@nestjs/common';
 import {
     ApiTags,
@@ -25,6 +27,8 @@ import { RegisterClientDto } from './dto/register-client.dto';
 import { RegisterClientStep1Dto } from './dto/register-client-step1.dto';
 import { RegisterClientStep2Dto } from './dto/register-client-step2.dto';
 import { RegisterClientStep3Dto } from './dto/register-client-step3.dto';
+import { VerifyRegistrationOtpDto } from './dto/verify-registration-otp.dto';
+import { SetupPasswordDto } from './dto/setup-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -85,7 +89,7 @@ export class AuthController {
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Inscription client - Étape 1',
-        description: 'Première étape : Nom, Prénom, Email, Téléphone. Retourne un token de session pour les étapes suivantes.'
+        description: 'Première étape : Toutes les informations (Nom, Prénom, Email, Téléphone, Adresse, Date de naissance, Genre, Situation matrimoniale). Envoie un code OTP par email et SMS. Retourne un token de session pour les étapes suivantes.'
     })
     @ApiBody({ type: RegisterClientStep1Dto })
     @ApiResponse({
@@ -94,10 +98,11 @@ export class AuthController {
         schema: {
             type: 'object',
             properties: {
-                message: { type: 'string', example: 'Étape 1 complétée avec succès' },
+                message: { type: 'string', example: 'Code OTP envoyé par email et SMS' },
                 sessionToken: { type: 'string', example: 'session-token-123' },
                 expiresIn: { type: 'string', example: '30 minutes' },
-                nextStep: { type: 'string', example: 'step2' },
+                otpExpiresIn: { type: 'string', example: '10 minutes' },
+                nextStep: { type: 'string', example: 'verify-otp' },
             },
         },
     })
@@ -110,29 +115,30 @@ export class AuthController {
         return this.authService.registerClientStep1(step1Dto, ipAddress);
     }
 
-    @Post('register/client/step2')
+    @Post('register/client/verify-otp')
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
-        summary: 'Inscription client - Étape 2',
-        description: 'Deuxième étape : Adresse, Date de naissance, Genre, Situation matrimoniale. Nécessite le token de session de l\'étape 1.'
+        summary: 'Vérifier le code OTP et créer le compte',
+        description: 'Vérifie le code OTP reçu par email et SMS après l\'étape 1. Si l\'OTP est valide, crée le compte et envoie un lien email pour la création du mot de passe.'
     })
-    @ApiBody({ type: RegisterClientStep2Dto })
+    @ApiBody({ type: VerifyRegistrationOtpDto })
     @ApiResponse({
         status: 200,
-        description: 'Étape 2 complétée avec succès',
+        description: 'Code OTP vérifié avec succès. Le compte a été créé et un lien de création de mot de passe a été envoyé par email.',
         schema: {
             type: 'object',
             properties: {
-                message: { type: 'string', example: 'Étape 2 complétée avec succès' },
-                sessionToken: { type: 'string', example: 'session-token-123' },
-                nextStep: { type: 'string', example: 'step3' },
+                message: { type: 'string', example: 'Code OTP vérifié avec succès. Votre compte a été créé. Un lien de création de mot de passe a été envoyé à votre adresse email.' },
+                email: { type: 'string', example: 'user@example.com' },
+                verified: { type: 'boolean', example: true },
+                nextStep: { type: 'string', example: 'setup-password' },
             },
         },
     })
-    @ApiResponse({ status: 400, description: 'Session invalide, expirée ou données invalides' })
-    async registerClientStep2(@Body() step2Dto: RegisterClientStep2Dto) {
-        const { sessionToken, ...step2Data } = step2Dto;
-        return this.authService.registerClientStep2(sessionToken, step2Data);
+    @ApiResponse({ status: 400, description: 'Session invalide, expirée, OTP incorrect ou expiré' })
+    @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
+    async verifyRegistrationOtp(@Body() verifyOtpDto: VerifyRegistrationOtpDto) {
+        return this.authService.verifyRegistrationOtp(verifyOtpDto.sessionToken, verifyOtpDto.otp);
     }
 
     @Post('register/client/step3')
@@ -175,6 +181,42 @@ export class AuthController {
         @IpAddress() ipAddress: string,
     ) {
         return this.authService.registerClientStep3(step3Dto, ipAddress);
+    }
+
+    @Post('login')
+    @HttpCode(HttpStatus.OK)
+    @UseGuards(LocalAuthGuard)
+    @ApiOperation({
+        summary: 'Connexion (tous types)',
+        description: 'Connexion par email et mot de passe. Le rôle (Admin, Client, Organisation) est déterminé automatiquement selon l\'utilisateur en base.',
+    })
+    @ApiBody({ type: LoginDto })
+    @ApiResponse({
+        status: 200,
+        description: 'Connexion réussie',
+        schema: {
+            type: 'object',
+            properties: {
+                accessToken: { type: 'string' },
+                refreshToken: { type: 'string' },
+                user: {
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        name: { type: 'string' },
+                        email: { type: 'string' },
+                        role: { type: 'string' },
+                        type: { type: 'string' },
+                        organisationId: { type: 'string' },
+                        organisationRole: { type: 'string' },
+                    },
+                },
+            },
+        },
+    })
+    @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
+    async login(@Body() loginDto: LoginDto, @IpAddress() ipAddress: string) {
+        return this.authService.login(loginDto, ipAddress);
     }
 
     @Post('login/admin')
@@ -533,5 +575,108 @@ export class AuthController {
         return {
             message: 'Email vérifié avec succès',
         };
+    }
+
+    @Post('setup-password')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary: 'Créer le mot de passe après inscription',
+        description: 'Crée le mot de passe pour un compte en attente de création de mot de passe. Active le compte et retourne les tokens JWT.'
+    })
+    @ApiBody({ type: SetupPasswordDto })
+    @ApiResponse({
+        status: 200,
+        description: 'Mot de passe créé avec succès. Le compte est maintenant actif.',
+        schema: {
+            type: 'object',
+            properties: {
+                message: { type: 'string', example: 'Mot de passe créé avec succès. Votre compte est maintenant actif.' },
+                accessToken: { type: 'string' },
+                refreshToken: { type: 'string' },
+                user: {
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        name: { type: 'string' },
+                        email: { type: 'string' },
+                        role: { type: 'string', example: 'CLIENT' },
+                        isActive: { type: 'boolean', example: true },
+                    },
+                },
+            },
+        },
+    })
+    @ApiResponse({ status: 400, description: 'Token invalide, expiré, ou mots de passe ne correspondent pas' })
+    @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
+    async setupPassword(
+        @Body() setupPasswordDto: SetupPasswordDto,
+        @IpAddress() ipAddress: string,
+    ) {
+        return this.authService.setupPassword(setupPasswordDto, ipAddress);
+    }
+
+    @Get('verify-password-setup-token')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary: 'Vérifier le token de création de mot de passe',
+        description: 'Vérifie si le token de création de mot de passe est valide. Utilisé par le frontend pour afficher le formulaire de création de mot de passe. Appelé avec ?token=xxx'
+    })
+    @ApiResponse({
+        status: 200,
+        description: 'Token valide. Le frontend peut afficher le formulaire de création de mot de passe.',
+        schema: {
+            type: 'object',
+            properties: {
+                valid: { type: 'boolean', example: true },
+                email: { type: 'string', example: 'user@example.com' },
+                userName: { type: 'string', example: 'John Doe' },
+                message: { type: 'string', example: 'Token valide. Vous pouvez maintenant créer votre mot de passe.' },
+            },
+        },
+    })
+    @ApiResponse({ status: 400, description: 'Token invalide, expiré, ou compte déjà actif' })
+    @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
+    async verifyPasswordSetupToken(@Query('token') token: string) {
+        if (!token) {
+            throw new BadRequestException('Token requis');
+        }
+        return this.authService.verifyPasswordSetupToken(token);
+    }
+
+    @Post('resend-password-setup-link')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary: 'Renvoyer le lien de création de mot de passe',
+        description: 'Renvoie le lien de création de mot de passe par email pour un compte en attente.'
+    })
+    @ApiBody({
+        schema: {
+            type: 'object',
+            properties: {
+                email: {
+                    type: 'string',
+                    example: 'user@example.com',
+                    description: 'Email du compte en attente de création de mot de passe',
+                },
+            },
+            required: ['email'],
+        },
+    })
+    @ApiResponse({
+        status: 200,
+        description: 'Un nouveau lien de création de mot de passe a été envoyé',
+        schema: {
+            type: 'object',
+            properties: {
+                message: { type: 'string', example: 'Un nouveau lien de création de mot de passe a été envoyé à votre adresse email' },
+            },
+        },
+    })
+    @ApiResponse({ status: 400, description: 'Ce compte n\'est pas en attente de création de mot de passe' })
+    async resendPasswordSetupLink(
+        @Body('email') email: string,
+        @IpAddress() ipAddress: string,
+    ) {
+        return this.authService.resendPasswordSetupLink(email, ipAddress);
     }
 }

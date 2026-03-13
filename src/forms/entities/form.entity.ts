@@ -58,16 +58,25 @@ export class Form {
   pdfTemplate?: string; // URL du template PDF (optionnel, le fichier est stocké sur disque via pdfFilePath)
 
   @Column({ type: 'varchar', length: 500, nullable: true })
-  pdfFilePath?: string; // Chemin du fichier PDF stocké sur le serveur
+  pdfFilePath?: string; // Chemin MinIO du PDF modèle (ex: forms/form-{id}-{ts}.pdf)
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  pdfFileName?: string; // Nom original du fichier PDF
+  pdfFileName?: string; // Nom original du fichier PDF modèle
 
   @Column({ type: 'jsonb', nullable: true })
   editableFields?: any[]; // Champs modifiables
 
   @Column({ type: 'jsonb', default: '[]' })
   requiredDocuments: string[]; // IDs des documents requis
+
+  /** PDF annexes (modèles additionnels). Chaque entrée : label (nom), filePath (MinIO), fileName (nom original). url optionnel (régénérée à la volée). */
+  @Column({ type: 'jsonb', default: '[]' })
+  attachments: Array<{
+    label: string;
+    filePath: string;
+    fileName: string;
+    url?: string;
+  }>;
 
   @Column({
     type: 'enum',

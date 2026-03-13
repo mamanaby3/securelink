@@ -12,6 +12,8 @@ import {
   Patch,
   ForbiddenException,
   BadRequestException,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,7 +22,10 @@ import {
   ApiParam,
   ApiBearerAuth,
   ApiQuery,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { RequestsService } from './requests.service';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { SaveDraftRequestDto } from './dto/save-draft-request.dto';
@@ -157,9 +162,13 @@ export class RequestsController {
     @CurrentUser() user: any,
     @Body('verificationEmail') verificationEmail?: string,
   ) {
+    const userId = user?.userId ?? user?.sub;
+    if (!userId) {
+      throw new ForbiddenException('Utilisateur non identifié');
+    }
     // Vérifier que le client ne peut soumettre que ses propres brouillons
     const draft = await this.requestsService.findOne(id);
-    if (draft.clientId !== user.userId) {
+    if (draft.clientId !== userId) {
       throw new ForbiddenException('Vous ne pouvez soumettre que vos propres demandes');
     }
 
@@ -167,7 +176,7 @@ export class RequestsController {
 
     return {
       ...request,
-      message: `Un code OTP de 6 chiffres a été envoyé à ${request.verificationEmail}. Veuillez le vérifier pour finaliser votre demande.`,
+      message: `Un code OTP de 6 chiffres a été envoyé à ${request.verificationEmail ?? 'votre adresse'}. Veuillez le vérifier pour finaliser votre demande.`,
     };
   }
 
@@ -595,6 +604,65 @@ Cette méthode crée directement une demande soumise (ancien comportement).
     @Body() rejectDto: RejectRequestDto,
   ) {
     return this.requestsService.reject(id, rejectDto.reason, user.userId);
+  }
+
+  @Post(':id/upload-filled-pdf')
+  @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('Clients')
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Uploader le vrai PDF rempli de la demande',
+    description: `Permet d'attacher le **vrai PDF rempli** (provenant d'une application externe comme un éditeur de PDF) à une demande existante.
+
+Le fichier est stocké dans MinIO et devient le formulaire officiel de la demande du client (champ submittedForm.pdfUrl).
+
+**Rôles :** CLIENT (pour ses propres demandes) ou ADMIN.`,
+  })
+  @ApiParam({ name: 'id', description: 'ID de la demande' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'PDF rempli de la demande (contrat signé, formulaire complété, etc.)',
+        },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'PDF rempli attaché avec succès à la demande',
+  })
+  async uploadFilledPdf(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @CurrentUser() user: any,
+  ) {
+    const request = await this.requestsService.findOne(id);
+
+    // Un client ne peut uploader que pour ses propres demandes
+    if (user.role === UserRole.CLIENT && request.clientId !== user.userId) {
+      throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
+    }
+
+    const updatedRequest = await this.requestsService.uploadFilledPdf(id, {
+      buffer: file.buffer,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+    });
+
+    return {
+      id: updatedRequest.id,
+      requestNumber: updatedRequest.requestNumber,
+      submittedForm: updatedRequest.submittedForm,
+      message: 'PDF rempli attaché avec succès à la demande.',
+    };
   }
 
   @Post(':id/request-additional-documents')

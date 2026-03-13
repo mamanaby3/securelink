@@ -10,7 +10,9 @@ import {
   HttpStatus,
   Query,
   Patch,
+  Req,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
   Res,
 } from '@nestjs/common';
@@ -24,7 +26,7 @@ import {
   ApiConsumes,
   ApiBody,
 } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FileFieldsInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { FormsService } from './forms.service';
 import { CreateFormDto } from './dto/create-form.dto';
@@ -47,15 +49,20 @@ export class FormsController {
 
   @Get('create-options')
   @Roles(UserRole.ADMIN)
-  @ApiTags('Admin')
+  @ApiTags('Admin', )
   @ApiOperation({
-    summary: 'Obtenir les options pour créer un formulaire',
-    description: `Retourne toutes les options nécessaires pour créer un formulaire :
-- Secteurs disponibles (depuis les organisations enregistrées)
-- Types de formulaires disponibles
-- Organisations disponibles
+    summary: '[Étape 0] Options pour créer un formulaire',
+    description: `**Étape 0 du processus** — À appeler en premier.
 
-**Rôle requis : ADMIN**`
+Retourne les listes nécessaires pour créer un formulaire :
+- **sectors** : secteurs (Banque, Notaire, Assurance, Huissiers) avec id, value, label
+- **formTypes** : types (Transaction, Demande, Déclaration, Résiliation)
+- **organisations** : organisations avec id, name, sector
+- **documentTypes** : types de documents (CNI, etc.) pour requiredDocuments
+
+Utiliser les \`id\` retournés dans \`POST /forms\` (sectorId, formTypeId, organisationId, requiredDocuments).
+
+**Rôle : ADMIN**`
   })
   @ApiResponse({
     status: 200,
@@ -146,63 +153,71 @@ export class FormsController {
 
   @Post()
   @Roles(UserRole.ADMIN)
-  @UseInterceptors(FileInterceptor('pdfFile'))
-  @ApiTags('Admin')
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'pdfFile', maxCount: 1 },
+      { name: 'attachmentFiles', maxCount: 20 },
+    ]),
+  )
+  @ApiTags('Admin', )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Créer un nouveau formulaire (en une seule étape)',
-    description: `**Création complète du formulaire en une seule étape**
+    summary: 'Créer un formulaire (un seul endpoint)',
+    description: `**Création complète en une requête** — Formulaire (DRAFT) + **1..N PDFs** (un seul ou plusieurs).
 
-Créer un nouveau formulaire pour une organisation avec toutes les informations :
-- Informations de base (nom, version, description, secteur, type, organisation)
-- Fichier PDF du modèle (optionnel - peut être ajouté plus tard)
-- Documents requis (optionnel)
+**Champs obligatoires (form-data) :** name, version, sectorId, formTypeId, organisationId (IDs de \`GET /forms/create-options\`).
 
-**Processus automatique :**
-1.   un PDF est fourni 
-2. Le formulaire est créé avec le statut DRAFT
-3. Tous les détails sont retournés (organisation, documents requis avec leurs détails)
+**Optionnels :**
+- description
+- requiredDocuments (IDs séparés par des virgules)
+- **pdfFile** (1 PDF, max 10 MB) — si vous n'avez qu'un seul PDF
+- **attachmentFiles** (plusieurs PDFs) — si votre formulaire est composé de plusieurs PDFs
+- labels (noms dans le même ordre, ex. \`["Contrat","Accord"]\` ou \`Contrat,Accord\`)
 
-**Format :** multipart/form-data
+Si \`pdfFile\` est fourni : enregistrement MinIO + extraction des champs. Les \`attachmentFiles\` sont stockés dans \`attachments\` avec chaque \`labels[i]\`.
 
-**Rôle requis : ADMIN uniquement**`
+**Rôle : ADMIN**`
   })
   @ApiBody({
     schema: {
       type: 'object',
-            required: ['name', 'version', 'sectorId', 'formTypeId', 'organisationId'],
+      required: ['name', 'version', 'sectorId', 'formTypeId', 'organisationId'],
       properties: {
         name: { type: 'string', example: 'Demande de virement' },
         version: { type: 'string', example: '1.0' },
         description: { type: 'string', example: 'Formulaire pour effectuer un virement bancaire' },
-        sectorId: { type: 'string', format: 'uuid', description: 'ID du secteur d\'activité (depuis la base de données)', example: 'sector-uuid-123' },
-        formTypeId: { type: 'string', format: 'uuid', description: 'ID du type de formulaire (depuis la base de données)', example: 'form-type-uuid-123' },
-        organisationId: { type: 'string', example: 'org-123' },
-        requiredDocuments: { 
-          type: 'string', 
-          description: 'IDs des types de documents requis depuis la base de données (table document_types), séparés par des virgules (ex: "doc-type-uuid-1,doc-type-uuid-2"). Utilisez GET /api/forms/create-options pour obtenir la liste des types de documents disponibles.',
-          example: 'doc-type-uuid-1,doc-type-uuid-2'
-        },
-        pdfFile: {
+        sectorId: { type: 'string', format: 'uuid', description: 'ID du secteur (GET /forms/create-options)' },
+        formTypeId: { type: 'string', format: 'uuid', description: 'ID du type (GET /forms/create-options)' },
+        organisationId: { type: 'string', description: 'ID de l\'organisation' },
+        requiredDocuments: {
           type: 'string',
-          format: 'binary',
-          description: 'Fichier PDF du formulaire (optionnel, max 10 MB)',
+          description: 'IDs document_types séparés par des virgules',
+          example: 'doc-type-uuid-1,doc-type-uuid-2',
+        },
+        pdfFile: { type: 'string', format: 'binary', description: 'PDF modèle (optionnel, max 10 MB)' },
+        attachmentFiles: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+          description: 'PDFs annexes (Contrat, Renseignements, etc.)',
+        },
+        labels: {
+          type: 'string',
+          description: 'Noms des pièces jointes, même ordre (JSON array ou virgules)',
+          example: '["Contrat", "Renseignements"]',
         },
       },
     },
   })
-  @ApiResponse({ 
-    status: 201, 
-    description: 'Formulaire créé avec succès avec tous les détails',
-  })
+  @ApiResponse({ status: 201, description: 'Formulaire créé avec succès (détails + editableFields + attachments)' })
   @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ADMIN requis' })
   @ApiResponse({ status: 400, description: 'Données invalides ou PDF invalide' })
   @HttpCode(HttpStatus.CREATED)
-  async create(
-    @Body() createFormDto: any,
-    @UploadedFile() pdfFile?: any,
-  ) {
-    // Parser les documents requis si fournis
+  async create(@Body() createFormDto: any, @Req() req: any) {
+    type FileArray = { buffer: Buffer; originalname: string; mimetype: string; size: number }[];
+    const files = req.files as { pdfFile?: FileArray; attachmentFiles?: FileArray } | undefined;
+    const pdfFile = files?.pdfFile?.[0];
+    const attachmentFiles = files?.attachmentFiles || [];
+
     let requiredDocuments: string[] = [];
     if (createFormDto.requiredDocuments) {
       if (typeof createFormDto.requiredDocuments === 'string') {
@@ -212,6 +227,20 @@ Créer un nouveau formulaire pour une organisation avec toutes les informations 
           .filter((id: string) => id.length > 0);
       } else if (Array.isArray(createFormDto.requiredDocuments)) {
         requiredDocuments = createFormDto.requiredDocuments;
+      }
+    }
+
+    let labels: string[] = [];
+    if (createFormDto.labels) {
+      if (Array.isArray(createFormDto.labels)) {
+        labels = createFormDto.labels.map((v: string) => String(v));
+      } else if (typeof createFormDto.labels === 'string') {
+        try {
+          const parsed = JSON.parse(createFormDto.labels);
+          labels = Array.isArray(parsed) ? parsed.map((v: string) => String(v)) : createFormDto.labels.split(',').map((s: string) => s.trim()).filter(Boolean);
+        } catch {
+          labels = createFormDto.labels.split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
       }
     }
 
@@ -225,28 +254,39 @@ Créer un nouveau formulaire pour une organisation avec toutes les informations 
       requiredDocuments,
     };
 
-    return this.formsService.create(formData, pdfFile);
+    const pdfFilePayload = pdfFile
+      ? { buffer: pdfFile.buffer, originalname: pdfFile.originalname, mimetype: pdfFile.mimetype, size: pdfFile.size }
+      : undefined;
+    const attachmentFilesPayload =
+      attachmentFiles.length > 0
+        ? attachmentFiles.map((f: { buffer: Buffer; originalname: string; mimetype: string; size: number }) => ({
+            buffer: f.buffer,
+            originalname: f.originalname,
+            mimetype: f.mimetype,
+            size: f.size,
+          }))
+        : undefined;
+
+    return this.formsService.create(formData, pdfFilePayload, attachmentFilesPayload, labels.length > 0 ? labels : undefined);
   }
 
   @Post(':id/upload-pdf')
   @Roles(UserRole.ADMIN)
   @UseInterceptors(FileInterceptor('file'))
-  @ApiTags('Admin')
+  @ApiTags('Admin', )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Téléverser le modèle PDF et extraire les champs automatiquement',
-    description: `**Téléversement du PDF avec extraction automatique des champs**
+    summary: '[DEPRECATED] Téléverser le PDF modèle',
+    deprecated: true,
+    description: `**Déprécié** — Ne pas utiliser pour créer un formulaire multi-PDF.
 
-Téléverse le modèle PDF du formulaire et extrait automatiquement tous les champs de formulaire présents dans le PDF.
+Utilisez plutôt \`POST /forms\` (multipart) avec \`pdfFile\` et/ou \`attachmentFiles\`.
 
-**Processus :**
-1. Le PDF est enregistré sur le serveur (dans \`uploads/forms/\`)
-2. Les champs du PDF sont automatiquement extraits (text, checkbox, radio, select, etc.)
-3. Les champs extraits sont retournés pour que l'admin puisse les ajuster si nécessaire
+Ancien usage : ajouter ou remplacer le PDF principal du formulaire.
 
-**Note :** Le PDF enregistré sera celui que les clients pourront remplir plus tard.
+Le PDF est enregistré (MinIO), les champs sont extraits automatiquement (text, checkbox, radio, select). Les champs sont retournés pour ajustement via \`PATCH /forms/:id/fields\`. Formulaire doit être en DRAFT.
 
-**Rôle requis : ADMIN uniquement**`
+**Rôle : ADMIN**`
   })
   @ApiParam({ name: 'id', description: 'ID du formulaire' })
   @ApiBody({
@@ -301,6 +341,85 @@ Téléverse le modèle PDF du formulaire et extrait automatiquement tous les cha
       mimetype: file.mimetype,
       size: file.size,
     });
+  }
+
+  @Post(':id/attachments')
+  @Roles(UserRole.ADMIN)
+  @UseInterceptors(FilesInterceptor('files'))
+  @ApiTags('Admin', )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: '[DEPRECATED] Ajouter des PDFs annexes (Contrat, Renseignements, etc.)',
+    deprecated: true,
+    description: `**Déprécié** — Ne pas utiliser pour créer un formulaire multi-PDF.
+
+Utilisez plutôt \`POST /forms\` (multipart) avec \`attachmentFiles\` + \`labels\`.
+
+Ancien usage : ajouter plusieurs PDFs nommés au formulaire.
+
+Body : \`files\` (liste de PDF), \`labels\` (noms dans le même ordre, ex. ["Contrat", "Renseignements"]). Stockage MinIO, formulaire en DRAFT uniquement.
+
+**Rôle : ADMIN**`,
+  })
+  @ApiParam({ name: 'id', description: 'ID du formulaire' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        files: {
+          type: 'array',
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
+          description: 'Liste des fichiers PDF à ajouter',
+        },
+        labels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Liste des noms (contrat, renseignement, etc.), même ordre que les fichiers',
+          example: ['Contrat', 'Renseignements'],
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pièces jointes ajoutées avec succès',
+  })
+  async addAttachments(
+    @Param('id') id: string,
+    @UploadedFiles() files: any[],
+    @Body('labels') labelsRaw?: string | string[],
+  ) {
+    let labels: string[] = [];
+    if (Array.isArray(labelsRaw)) {
+      labels = labelsRaw;
+    } else if (typeof labelsRaw === 'string') {
+      try {
+        // Essayer de parser comme JSON ["Contrat","Renseignements"]
+        const parsed = JSON.parse(labelsRaw);
+        if (Array.isArray(parsed)) {
+          labels = parsed.map((v) => String(v));
+        }
+      } catch {
+        // Fallback: séparé par des virgules
+        labels = labelsRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+      }
+    }
+
+    const normalizedFiles =
+      files?.map((file) => ({
+        buffer: file.buffer,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+      })) ?? [];
+
+    return this.formsService.addAttachments(id, normalizedFiles, labels);
   }
 
   @Get(':id/pdf')
@@ -427,16 +546,30 @@ Permet de télécharger le PDF du formulaire. Ce PDF peut être :
   })
   @ApiResponse({ status: 404, description: 'Formulaire non trouvé' })
   findOne(@Param('id') id: string) {
-    return this.formsService.findOne(id);
+    return this.formsService.getDetail(id);
+  }
+
+  @Get(':id/pdf-options')
+  @Roles(UserRole.ADMIN, UserRole.ORGANISATION, UserRole.CLIENT)
+  @OrganisationRoles(OrganisationRole.AGENT, OrganisationRole.SUPERVISEUR, OrganisationRole.ADMINISTRATION)
+  @ApiTags('Admin', 'Organisations', 'Clients')
+  @ApiOperation({
+    summary: 'URLs des PDFs du formulaire (modèle + annexes)',
+    description: 'Retourne les URLs présignées des PDFs liés au formulaire pour les ouvrir dans un éditeur (ex. iframe). **Rôle : CLIENT, ORGANISATION, ADMIN**',
+  })
+  @ApiParam({ name: 'id', description: 'ID du formulaire' })
+  @ApiResponse({ status: 200, description: 'template (optionnel), attachments, all (liste unique pour choix)' })
+  getFormPdfOptions(@Param('id') id: string) {
+    return this.formsService.getFormPdfOptions(id);
   }
 
   @Patch(':id/status')
   @Roles(UserRole.ORGANISATION)
   @OrganisationRoles(OrganisationRole.ADMINISTRATION, OrganisationRole.SUPERVISEUR)
-  @ApiTags('Organisations')
+  @ApiTags('Organisations', )
   @ApiOperation({
-    summary: 'Mettre à jour le statut d\'un formulaire (ONLINE/OFFLINE)',
-    description: `Mettre à jour le statut d'un formulaire (ONLINE ou OFFLINE). 
+    summary: '[Étape 6] Mettre en ligne / hors ligne (ONLINE/OFFLINE)',
+    description: `**Étape 6 (côté organisation)** — Mettre à jour le statut d'un formulaire (ONLINE ou OFFLINE). 
     
 **Important :** 
 - Seuls les formulaires **activés par l'admin** peuvent être mis en ligne
@@ -540,12 +673,12 @@ Permet de télécharger le PDF du formulaire. Ce PDF peut être :
 
   @Patch(':id/activate')
   @Roles(UserRole.ADMIN)
-  @ApiTags('Admin')
+  @ApiTags('Admin', )
   @ApiOperation({
-    summary: 'Activer un formulaire',
-    description: `Active un formulaire créé par l'admin. Un formulaire doit être activé avant que l'organisation puisse le mettre en ligne (ONLINE).
+    summary: '[Étape 5] Activer le formulaire',
+    description: `**Étape 5** — Active le formulaire. Obligatoire avant que l'organisation puisse le mettre en ligne (\`PATCH /forms/:id/status\` avec status=ONLINE).
 
-**Rôle requis : ADMIN**`
+**Rôle : ADMIN**`
   })
   @ApiParam({ name: 'id', description: 'ID du formulaire' })
   @ApiResponse({
@@ -560,7 +693,7 @@ Permet de télécharger le PDF du formulaire. Ce PDF peut être :
 
   @Patch(':id/deactivate')
   @Roles(UserRole.ADMIN)
-  @ApiTags('Admin')
+  @ApiTags('Admin', )
   @ApiOperation({
     summary: 'Désactiver un formulaire',
     description: `Désactive un formulaire. Un formulaire désactivé ne peut pas être mis en ligne (ONLINE) par l'organisation.
@@ -580,10 +713,10 @@ Permet de télécharger le PDF du formulaire. Ce PDF peut être :
 
   @Patch(':id/fields')
   @Roles(UserRole.ADMIN)
-  @ApiTags('Admin')
+  @ApiTags('Admin', )
   @ApiOperation({
-    summary: 'Ajuster les champs modifiables et définir les documents requis (Étape 2)',
-    description: `**Étape 2 : Configuration des champs et documents**
+    summary: '[Étape 3] Champs modifiables et documents requis',
+    description: `**Étape 3** — Configuration des champs et documents
 
 Permet à l'administrateur de :
 1. **Ajuster les champs modifiables** (\`editableFields\`) :
@@ -647,7 +780,7 @@ Permet à l'administrateur de :
   @Delete(':id')
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiTags('Admin')
+  @ApiTags('Admin', )
   @ApiOperation({
     summary: 'Supprimer un formulaire',
     description: 'Supprimer définitivement un formulaire. **Rôle requis : ADMIN**'

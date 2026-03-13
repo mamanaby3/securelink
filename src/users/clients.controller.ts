@@ -90,34 +90,60 @@ export class ClientsController {
 
   @Get('recent-requests')
   @ApiOperation({
-    summary: 'Demandes récentes',
-    description: 'Retourne les demandes récentes du client (par défaut, les 5 plus récentes). **Rôle requis : CLIENT**'
+    summary: 'Demandes récentes (avec filtres et recherche)',
+    description:
+      'Retourne les demandes récentes du client.\n\n' +
+      '**Filtres** (paramètres optionnels) :\n' +
+      '- `status` : statut de la demande\n' +
+      '- `category` : secteur d\'activité (BANQUE, NOTAIRE, ASSURANCE, HUISSIER)\n' +
+      '- `institution` : nom de l\'organisation (recherche partielle)\n' +
+      '- `type` : type / nom du formulaire (recherche partielle)\n\n' +
+      '**Recherche** :\n' +
+      '- `search` : recherche globale dans le numéro de demande (ex. DEM-998), le nom de l\'institution et le type de formulaire.\n\n' +
+      '**Rôle requis : CLIENT**',
   })
-  @ApiQuery({ name: 'limit', required: false, description: 'Nombre de demandes à retourner (par défaut: 5)' })
+  @ApiQuery({ name: 'limit', required: false, type: String, description: 'Nombre de demandes à retourner (défaut: 5, max: 50)', example: '10' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['EN_ATTENTE', 'EN_COURS', 'VALIDEE', 'REJETEE'],
+    description: 'Filtre : statut de la demande',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    enum: ['BANQUE', 'NOTAIRE', 'ASSURANCE', 'HUISSIER'],
+    description: 'Filtre : secteur d\'activité de l\'organisation',
+  })
+  @ApiQuery({ name: 'institution', required: false, type: String, description: 'Filtre : nom de l\'organisation (recherche partielle)', example: 'ICI' })
+  @ApiQuery({ name: 'type', required: false, type: String, description: 'Filtre : type ou nom du formulaire (recherche partielle)', example: 'virement' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Recherche : numéro (DEM-xxx), institution, type de formulaire', example: 'DEM-998' })
   @ApiResponse({ status: 200, description: 'Liste des demandes récentes' })
   async getRecentRequests(
     @CurrentUser() user: any,
     @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('institution') institution?: string,
+    @Query('type') type?: string,
+    @Query('search') search?: string,
   ) {
-    const limitNum = limit ? parseInt(limit, 10) : 5;
-    const requests = await this.requestsService.findByClient(user.userId);
+    const limitNum = Math.min(limit ? parseInt(limit, 10) : 5, 50);
+    const filters = [status, category, institution, type, search].some(Boolean)
+      ? { status, category, institution, type, search }
+      : undefined;
+    const requests = await this.requestsService.findRecentByClient(user.userId, limitNum, filters);
 
-    // Trier par date (plus récent en premier) et limiter
-    const recentRequests = requests
-      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
-      .slice(0, limitNum)
-      .map((req) => ({
-        id: req.id,
-        requestNumber: req.requestNumber,
-        institution: req.organisationName || 'N/A',
-        category: this.getCategoryFromSector(req.formType),
-        type: req.formName,
-        date: req.submittedAt,
-        status: req.status,
-        timeAgo: this.getTimeAgo(req.submittedAt),
-      }));
-
-    return recentRequests;
+    return requests.map((req) => ({
+      id: req.id,
+      requestNumber: req.requestNumber,
+      institution: req.organisation?.name ?? req.organisationName ?? 'N/A',
+      category: this.getCategoryFromOrganisationSector(req.organisation?.sector) ?? this.getCategoryFromSector(req.formType),
+      type: req.formName,
+      date: req.submittedAt,
+      status: req.status,
+      timeAgo: this.getTimeAgo(req.submittedAt),
+    }));
   }
 
   @Get('expiring-documents')
@@ -318,7 +344,21 @@ export class ClientsController {
   }
 
   /**
-   * Obtient la catégorie à partir du secteur
+   * Secteur d'activité de l'organisation → libellé affiché (category)
+   */
+  private getCategoryFromOrganisationSector(sector?: string): string | null {
+    if (!sector) return null;
+    const labels: { [key: string]: string } = {
+      'BANQUE': 'Banque',
+      'NOTAIRE': 'Notaire',
+      'ASSURANCE': 'Assurance',
+      'HUISSIER': 'Huissier',
+    };
+    return labels[sector] ?? null;
+  }
+
+  /**
+   * Fallback: catégorie à partir du type de formulaire (si pas d'organisation/secteur)
    */
   private getCategoryFromSector(formType?: string): string {
     if (!formType) return 'Autre';

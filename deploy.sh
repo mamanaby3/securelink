@@ -33,6 +33,15 @@ if [ ! -f .env ]; then
     fi
 fi
 
+# Créer le dossier uploads avec permissions pour le conteneur (user nestjs uid 1001)
+echo "📁 Création du dossier uploads pour les logos..."
+mkdir -p uploads/logos
+chmod 755 uploads
+chmod 755 uploads/logos 2>/dev/null || true
+if [ "$(uname)" != "Darwin" ] && [ "$(uname)" != "MINGW"* ]; then
+    chown 1001:1001 uploads uploads/logos 2>/dev/null || chmod 777 uploads
+fi
+
 # Construire les images
 echo "📦 Construction des images Docker..."
 docker-compose build --no-cache
@@ -85,6 +94,8 @@ fi
 
 echo ""
 echo "✅ Déploiement terminé avec succès!"
+
+
 
 
 

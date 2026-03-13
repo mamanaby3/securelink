@@ -1,14 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, MinLength, Matches, IsBoolean } from 'class-validator';
+import { IsNotEmpty, IsString, MinLength, Matches } from 'class-validator';
 
-export class RegisterClientStep3Dto {
+export class SetupPasswordDto {
   @ApiProperty({
-    description: 'Token de session de l\'étape précédente',
-    example: 'session-token-123',
+    description: 'Token de création de mot de passe reçu par email',
+    example: 'pwd-setup-1234567890-abc123',
   })
   @IsString()
-  @IsNotEmpty({ message: 'Le token de session est requis' })
-  sessionToken: string;
+  @IsNotEmpty({ message: 'Le token est requis' })
+  token: string;
 
   @ApiProperty({
     description: 'Mot de passe (minimum 8 caractères, avec majuscule, minuscule, chiffre et caractère spécial)',
@@ -35,23 +35,7 @@ export class RegisterClientStep3Dto {
     message: 'La confirmation du mot de passe doit contenir au moins une majuscule, une minuscule, un chiffre et un caractère spécial',
   })
   confirmPassword: string;
-
-  @ApiProperty({
-    description: 'Acceptation des conditions d\'utilisation et de la politique de confidentialité',
-    example: true,
-  })
-  @IsBoolean()
-  @IsNotEmpty({ message: 'Vous devez accepter les conditions d\'utilisation' })
-  acceptTerms: boolean;
 }
-
-
-
-
-
-
-
-
 
 
 

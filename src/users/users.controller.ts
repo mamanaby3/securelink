@@ -14,6 +14,7 @@ import {
   UseInterceptors,
   BadRequestException,
   ForbiddenException,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -777,7 +778,24 @@ Chaque type indique :
     description: 'Liste des documents',
   })
   async getUserDocuments(@CurrentUser() user: any) {
-    return this.usersProfileService.getUserDocuments(user.userId);
+    return this.usersProfileService.getUserDocumentsWithPreviews(user.userId);
+  }
+
+  @Get('profile/documents/:documentId/file')
+  @Roles(UserRole.CLIENT)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiTags('Clients')
+  @ApiOperation({
+    summary: 'Fichier d’un document (aperçu)',
+    description: 'Retourne le fichier pour affichage (miniature). **Rôle requis : CLIENT**',
+  })
+  @ApiParam({ name: 'documentId', description: 'ID du document' })
+  @ApiResponse({ status: 200, description: 'Fichier binaire' })
+  @ApiResponse({ status: 404, description: 'Document non trouvé' })
+  async getDocumentFile(@CurrentUser() user: any, @Param('documentId') documentId: string) {
+    const { buffer, mimeType } = await this.usersProfileService.getDocumentFile(user.userId, documentId);
+    return new StreamableFile(buffer, { type: mimeType });
   }
 
   @Delete('profile/documents/:documentId')

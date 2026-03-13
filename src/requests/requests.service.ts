@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { QueryFailedError } from 'typeorm';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { SaveDraftRequestDto } from './dto/save-draft-request.dto';
 import { Request, RequestStatus, RequestTrackingStatus } from './entities/request.entity';
@@ -12,9 +13,11 @@ import { UserDocument, DocumentStatus } from '../users/entities/user-document.en
 import { DocumentType as DocumentTypeEntity } from '../documents/entities/document-type.entity';
 import { EmailService } from '../common/services/email.service';
 import { SmsService } from '../common/services/sms.service';
+import { MinioService } from '../storage/minio.service';
 
 @Injectable()
 export class RequestsService {
+  private readonly logger = new Logger(RequestsService.name);
   private readonly OTP_EXPIRATION = 10 * 60 * 1000; // 10 minutes
   private readonly OTP_LENGTH = 6;
 
@@ -31,6 +34,7 @@ export class RequestsService {
     private requestRepository: Repository<Request>,
     private emailService: EmailService,
     private smsService: SmsService,
+    private minioService: MinioService,
   ) { }
 
   /**
@@ -95,16 +99,17 @@ export class RequestsService {
    * requiredDocumentIds contient les IDs des DocumentType (entity)
    */
   private async verifyRequiredDocuments(clientId: string, requiredDocumentIds: string[]): Promise<void> {
-    if (!requiredDocumentIds || requiredDocumentIds.length === 0) {
+    const ids = Array.isArray(requiredDocumentIds) ? requiredDocumentIds : [];
+    if (ids.length === 0) {
       return; // Aucun document requis
     }
 
     // Récupérer les types de documents requis
     const requiredDocumentTypes = await this.documentTypeRepository.find({
-      where: requiredDocumentIds.map((id) => ({ id })),
+      where: ids.map((id) => ({ id })),
     });
 
-    if (requiredDocumentTypes.length !== requiredDocumentIds.length) {
+    if (requiredDocumentTypes.length !== ids.length) {
       throw new BadRequestException('Certains types de documents requis sont introuvables');
     }
 
@@ -191,6 +196,12 @@ export class RequestsService {
           existingDraft.formId = draftDto.formId;
           existingDraft.formName = form.name;
           existingDraft.formType = form.formType;
+          existingDraft.formSchemaSnapshot = {
+            formId: form.id,
+            name: form.name,
+            version: form.version,
+            editableFields: form.editableFields ?? [],
+          };
         }
 
         if (draftDto.organisationId) {
@@ -218,6 +229,15 @@ export class RequestsService {
     let formName: string | undefined = undefined;
     let formType: FormType | undefined = undefined;
 
+    let formSchemaSnapshot:
+      | {
+        formId: string;
+        name: string;
+        version: string;
+        editableFields?: any[];
+      }
+      | undefined;
+
     if (draftDto.formId) {
       const form = await this.formRepository.findOne({ where: { id: draftDto.formId } });
       if (!form) {
@@ -229,6 +249,12 @@ export class RequestsService {
       }
       formName = form.name;
       formType = form.formType;
+      formSchemaSnapshot = {
+        formId: form.id,
+        name: form.name,
+        version: form.version,
+        editableFields: form.editableFields ?? [],
+      };
     }
 
     // Les brouillons n'ont pas de numéro de demande
@@ -246,6 +272,7 @@ export class RequestsService {
       beneficiary: draftDto.beneficiary,
       amount: draftDto.amount,
       formData: draftDto.formData,
+      formSchemaSnapshot,
       tracking: [],
       // Pas de submittedAt pour un brouillon
       // Pas d'OTP pour un brouillon
@@ -258,117 +285,164 @@ export class RequestsService {
    * Soumet une demande (passe de BROUILLON à EN_ATTENTE après vérification OTP)
    */
   async submitRequest(requestId: string, clientEmail?: string): Promise<Request> {
-    const draft = await this.requestRepository.findOne({
-      where: { id: requestId },
-      relations: ['form', 'client'],
-    });
+    try {
+      const draft = await this.requestRepository.findOne({
+        where: { id: requestId },
+        relations: ['form', 'client'],
+      });
 
-    if (!draft) {
-      throw new NotFoundException('Demande non trouvée');
-    }
+      if (!draft) {
+        throw new NotFoundException('Demande non trouvée');
+      }
 
-    if (draft.status !== RequestStatus.BROUILLON) {
-      throw new BadRequestException('Cette demande a déjà été soumise');
-    }
+      if (draft.status !== RequestStatus.BROUILLON) {
+        throw new BadRequestException('Cette demande a déjà été soumise');
+      }
 
-    // Vérifier que le formulaire est défini
-    if (!draft.formId) {
-      throw new BadRequestException('Veuillez sélectionner un formulaire');
-    }
+      // Vérifier que le formulaire est défini
+      if (!draft.formId) {
+        throw new BadRequestException('Veuillez sélectionner un formulaire');
+      }
 
-    // Vérifier que l'organisation est définie
-    if (!draft.organisationId) {
-      throw new BadRequestException('Veuillez sélectionner une organisation');
-    }
+      // Vérifier que l'organisation est définie
+      if (!draft.organisationId) {
+        throw new BadRequestException('Veuillez sélectionner une organisation');
+      }
 
-    // Récupérer le formulaire pour vérifier les documents requis
-    const form = await this.formRepository.findOne({
-      where: { id: draft.formId },
-    });
+      // Récupérer le formulaire pour vérifier les documents requis
+      const form = await this.formRepository.findOne({
+        where: { id: draft.formId },
+      });
 
-    if (!form) {
-      throw new NotFoundException('Formulaire non trouvé');
-    }
+      if (!form) {
+        throw new NotFoundException('Formulaire non trouvé');
+      }
 
-    // Vérifier que le formulaire est ONLINE
-    if (form.status !== FormStatus.ONLINE) {
-      throw new BadRequestException('Ce formulaire n\'est pas disponible pour le moment');
-    }
+      // Vérifier que le formulaire est ONLINE
+      if (form.status !== FormStatus.ONLINE) {
+        throw new BadRequestException('Ce formulaire n\'est pas disponible pour le moment');
+      }
 
-    // Vérifier que le client a tous les documents requis validés
-    if (form.requiredDocuments && form.requiredDocuments.length > 0) {
+      // S'assurer que le brouillon possède un snapshot de formulaire
+      if (!draft.formSchemaSnapshot) {
+        draft.formSchemaSnapshot = {
+          formId: form.id,
+          name: form.name,
+          version: form.version,
+          editableFields: form.editableFields ?? [],
+        };
+      }
+
+      // Vérifier que le client a tous les documents requis validés
+      const requiredDocIds = Array.isArray(form.requiredDocuments) ? form.requiredDocuments : [];
+      if (requiredDocIds.length > 0) {
+        await this.verifyRequiredDocuments(draft.clientId, requiredDocIds);
+      }
+
+      // Récupérer le client
+      const client = await this.userRepository.findOne({
+        where: { id: draft.clientId },
+      });
+
+      if (!client) {
+        throw new NotFoundException('Client non trouvé');
+      }
+
+      // Générer un code OTP de 6 chiffres
+      const otpCode = this.generateOtp();
+      const otpExpiry = new Date(Date.now() + this.OTP_EXPIRATION);
+
+      // Utiliser l'email fourni ou celui du client
+      const verificationEmail = clientEmail || client.email;
+
+      // Générer le numéro de demande définitif (uniquement si pas déjà généré)
+      if (!draft.requestNumber) {
+        draft.requestNumber = await this.generateUniqueRequestNumber();
+      }
+
+      // Mettre à jour la demande : passer en EN_ATTENTE et ajouter l'OTP
+      draft.status = RequestStatus.EN_ATTENTE;
+      draft.otpCode = otpCode;
+      draft.otpExpiry = otpExpiry;
+      draft.otpVerified = false;
+      draft.verificationEmail = verificationEmail;
+      draft.tracking = [
+        {
+          status: RequestTrackingStatus.SOUMISE,
+          date: new Date(),
+        },
+      ];
+      draft.updatedAt = new Date();
+      // submittedAt sera défini après vérification OTP
+
+      const maxSaveAttempts = 5;
+      let savedRequest: Request | null = null;
+      for (let attempt = 1; attempt <= maxSaveAttempts; attempt++) {
+        try {
+          savedRequest = await this.requestRepository.save(draft);
+          break;
+        } catch (saveErr: any) {
+          const pgCode = saveErr?.code ?? saveErr?.driverError?.code;
+          const isDuplicateRequestNumber =
+            saveErr instanceof QueryFailedError && pgCode === '23505';
+          if (isDuplicateRequestNumber && attempt < maxSaveAttempts) {
+            draft.requestNumber = await this.generateUniqueRequestNumber();
+            this.logger.warn(
+              `Conflit de numéro de demande (tentative ${attempt}/${maxSaveAttempts}), nouveau numéro: ${draft.requestNumber}`,
+            );
+            continue;
+          }
+          throw saveErr;
+        }
+      }
+      if (!savedRequest) {
+        throw new InternalServerErrorException('Erreur lors de l\'enregistrement de la demande.');
+      }
+
+      // Envoyer l'OTP par email (non bloquant)
+      const finalRequestNumber = savedRequest.requestNumber ?? draft.requestNumber;
       try {
-        await this.verifyRequiredDocuments(draft.clientId, form.requiredDocuments);
-      } catch (error) {
-        // Re-lancer l'erreur pour qu'elle soit retournée au client avec le bon message
+        await this.emailService.sendRequestOtpEmail(
+          verificationEmail,
+          otpCode,
+          finalRequestNumber!,
+          client.name,
+        );
+      } catch (emailError: any) {
+        this.logger.warn(`Envoi OTP email pour demande ${finalRequestNumber} échoué: ${emailError?.message}`);
+      }
+
+      // Envoyer l'OTP par SMS si le client a un numéro de téléphone (non bloquant)
+      if (client.phone) {
+        try {
+          await this.smsService.sendOtpSms(
+            client.phone,
+            otpCode,
+            finalRequestNumber!,
+          );
+        } catch (smsError: any) {
+          this.logger.warn(`Envoi OTP SMS pour demande ${finalRequestNumber} échoué: ${smsError?.message}`);
+        }
+      }
+
+      return savedRequest;
+    } catch (error: any) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException ||
+        error instanceof InternalServerErrorException
+      ) {
         throw error;
       }
-    }
-
-    // Récupérer le client
-    const client = await this.userRepository.findOne({
-      where: { id: draft.clientId },
-    });
-
-    if (!client) {
-      throw new NotFoundException('Client non trouvé');
-    }
-
-    // Générer un code OTP de 6 chiffres
-    const otpCode = this.generateOtp();
-    const otpExpiry = new Date(Date.now() + this.OTP_EXPIRATION);
-
-    // Utiliser l'email fourni ou celui du client
-    const verificationEmail = clientEmail || client.email;
-
-    // Générer le numéro de demande définitif (uniquement si pas déjà généré)
-    if (!draft.requestNumber) {
-      draft.requestNumber = await this.generateUniqueRequestNumber();
-    }
-
-    // Mettre à jour la demande : passer en EN_ATTENTE et ajouter l'OTP
-    draft.status = RequestStatus.EN_ATTENTE;
-    draft.otpCode = otpCode;
-    draft.otpExpiry = otpExpiry;
-    draft.otpVerified = false;
-    draft.verificationEmail = verificationEmail;
-    draft.tracking = [
-      {
-        status: RequestTrackingStatus.SOUMISE,
-        date: new Date(),
-      },
-    ];
-    draft.updatedAt = new Date();
-    // submittedAt sera défini après vérification OTP
-
-    const savedRequest = await this.requestRepository.save(draft);
-
-    // Envoyer l'OTP par email
-    try {
-      await this.emailService.sendRequestOtpEmail(
-        verificationEmail,
-        otpCode,
-        draft.requestNumber,
-        client.name,
+      this.logger.error(
+        `submitRequest ${requestId} erreur inattendue: ${error?.message ?? error}`,
+        error?.stack,
       );
-    } catch (error) {
-      console.error(`Erreur lors de l'envoi de l'OTP par email pour la demande ${draft.requestNumber}:`, error);
+      throw new InternalServerErrorException(
+        'Erreur lors de la soumission de la demande. Veuillez réessayer.',
+      );
     }
-
-    // Envoyer l'OTP par SMS si le client a un numéro de téléphone
-    if (client.phone) {
-      try {
-        await this.smsService.sendOtpSms(
-          client.phone,
-          otpCode,
-          draft.requestNumber,
-        );
-      } catch (error) {
-        console.error(`Erreur lors de l'envoi de l'OTP par SMS pour la demande ${draft.requestNumber}:`, error);
-      }
-    }
-
-    return savedRequest;
   }
 
   async create(createRequestDto: CreateRequestDto, clientEmail?: string): Promise<Request> {
@@ -426,6 +500,12 @@ export class RequestsService {
       beneficiary: (createRequestDto as any).beneficiary,
       amount: (createRequestDto as any).amount,
       formData: (createRequestDto as any).formData,
+      formSchemaSnapshot: {
+        formId: form.id,
+        name: form.name,
+        version: form.version,
+        editableFields: form.editableFields ?? [],
+      },
       tracking: [
         {
           status: RequestTrackingStatus.SOUMISE,
@@ -517,6 +597,54 @@ export class RequestsService {
     }
 
     return queryBuilder.getMany();
+  }
+
+  /**
+   * Récupère les demandes récentes d'un client avec l'organisation chargée (pour institution / secteur).
+   * Filtres optionnels : status, category, institution, type, search (recherche globale).
+   */
+  async findRecentByClient(
+    clientId: string,
+    limit: number,
+    filters?: { status?: string; category?: string; institution?: string; type?: string; search?: string },
+  ): Promise<Request[]> {
+    const qb = this.requestRepository
+      .createQueryBuilder('request')
+      .leftJoinAndSelect('request.organisation', 'organisation')
+      .where('request.clientId = :clientId', { clientId })
+      .andWhere(
+        '(request.status != :draftStatus AND NOT (request.status = :enAttenteStatus AND (request.otpVerified = false OR request.otpVerified IS NULL)))',
+        {
+          draftStatus: RequestStatus.BROUILLON,
+          enAttenteStatus: RequestStatus.EN_ATTENTE,
+        },
+      );
+
+    if (filters?.status) {
+      qb.andWhere('request.status = :status', { status: filters.status });
+    }
+    if (filters?.category?.trim()) {
+      qb.andWhere('organisation.sector = :sector', { sector: filters.category.trim().toUpperCase() });
+    }
+    if (filters?.institution?.trim()) {
+      qb.andWhere('(organisation.name ILIKE :institution OR request.organisationName ILIKE :institution)', {
+        institution: `%${filters.institution.trim()}%`,
+      });
+    }
+    if (filters?.type?.trim()) {
+      qb.andWhere('(request.formName ILIKE :formName)', {
+        formName: `%${filters.type.trim()}%`,
+      });
+    }
+    if (filters?.search?.trim()) {
+      const searchTerm = `%${filters.search.trim()}%`;
+      qb.andWhere(
+        '(request.requestNumber ILIKE :search OR request.formName ILIKE :search OR request.organisationName ILIKE :search OR organisation.name ILIKE :search)',
+        { search: searchTerm },
+      );
+    }
+
+    return qb.orderBy('request.submittedAt', 'DESC').take(limit).getMany();
   }
 
   /**
@@ -898,6 +1026,51 @@ export class RequestsService {
     }
 
     return savedRequest;
+  }
+
+  /**
+   * Upload du vrai PDF rempli de la demande (provenant d'une app externe)
+   */
+  async uploadFilledPdf(
+    requestId: string,
+    file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+  ): Promise<Request> {
+    const request = await this.findOne(requestId);
+
+    if (!file) {
+      throw new BadRequestException('Aucun fichier fourni');
+    }
+
+    if (file.mimetype !== 'application/pdf') {
+      throw new BadRequestException('Le fichier doit être un PDF');
+    }
+
+    const maxSize = 20 * 1024 * 1024; // 20 MB
+    if (file.size > maxSize) {
+      throw new BadRequestException('Le fichier PDF est trop volumineux (max 20 MB)');
+    }
+
+    // On autorise l'upload pour toutes les demandes non brouillon
+    if (request.status === RequestStatus.BROUILLON) {
+      throw new BadRequestException('Vous devez d\'abord soumettre la demande avant d\'attacher le PDF rempli');
+    }
+
+    const fileName = `request-${request.id}-${Date.now()}.pdf`;
+    const minioPath = `requests/${fileName}`;
+
+    await this.minioService.uploadFile(minioPath, file.buffer, 'application/pdf');
+    const presignedUrl = await this.minioService.getPresignedUrl(minioPath);
+
+    request.submittedForm = {
+      pdfUrl: presignedUrl,
+      version:
+        request.formSchemaSnapshot?.version ||
+        request.form?.version ||
+        '1.0',
+    };
+
+    request.updatedAt = new Date();
+    return this.requestRepository.save(request);
   }
 
   async startProcess(id: string, userId: string): Promise<Request> {

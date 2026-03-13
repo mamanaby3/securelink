@@ -742,5 +742,169 @@ export class EmailService {
 </html>
     `;
   }
+
+  async sendPasswordSetupEmail(
+    to: string,
+    userName: string,
+    setupLink: string,
+    setupLinkMobile?: string | null,
+  ): Promise<void> {
+    if (!this.transporter) {
+      this.logger.warn('Transporter email non initialisé. Email non envoyé.');
+      console.log(`[DEV] Lien de création de mot de passe pour ${to}: ${setupLink}`);
+      if (setupLinkMobile) console.log(`[DEV] Lien mobile (deeplink) pour ${to}: ${setupLinkMobile}`);
+      return;
+    }
+
+    const subject = 'Créez votre mot de passe - Secure Link';
+    const html = this.getPasswordSetupEmailTemplate(userName, setupLink, setupLinkMobile ?? undefined);
+
+    const textParts = [
+      `Bonjour ${userName},`,
+      '',
+      'Votre inscription sur Secure Link a été validée. Pour finaliser votre compte, veuillez créer votre mot de passe :',
+      '',
+      'Sur ordinateur (navigateur) :',
+      setupLink,
+      '',
+    ];
+    if (setupLinkMobile) {
+      textParts.push('Sur l\'app mobile (deeplink) :');
+      textParts.push(setupLinkMobile);
+      textParts.push('');
+    }
+    textParts.push('Ce lien expire dans 24 heures.', '', "Si vous n'avez pas demandé cette inscription, veuillez ignorer cet email.");
+    const text = textParts.join('\n');
+
+    try {
+      const info = await this.transporter.sendMail({
+        from: `"Secure Link" <${this.configService.get<string>('EMAIL_USER')}>`,
+        to,
+        subject,
+        html,
+        text,
+      });
+
+      this.logger.log(`Email de création de mot de passe envoyé à ${to}. Message ID: ${info.messageId}`);
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email à ${to}:`, error);
+      console.log(`[DEV] Lien de création de mot de passe pour ${to}: ${setupLink}`);
+      if (setupLinkMobile) console.log(`[DEV] Lien mobile pour ${to}: ${setupLinkMobile}`);
+      throw new Error('Erreur lors de l\'envoi de l\'email. Veuillez réessayer plus tard.');
+    }
+  }
+
+  async sendRegistrationOtpEmail(to: string, otp: string, userName?: string): Promise<void> {
+    if (!this.transporter) {
+      this.logger.warn('Transporter email non initialisé. Email non envoyé.');
+      console.log(`[DEV] Code OTP d'inscription pour ${to}: ${otp}`);
+      return;
+    }
+
+    const subject = 'Code de vérification - Inscription Secure Link';
+    const html = this.getRegistrationOtpEmailTemplate(otp, userName);
+
+    try {
+      const info = await this.transporter.sendMail({
+        from: `"Secure Link" <${this.configService.get<string>('EMAIL_USER')}>`,
+        to,
+        subject,
+        html,
+        text: `${userName ? `Bonjour ${userName},\n\n` : 'Bonjour,\n\n'}Votre code de vérification pour finaliser votre inscription sur Secure Link est : ${otp}\n\nCe code expire dans 10 minutes.`,
+      });
+
+      this.logger.log(`Email OTP d'inscription envoyé à ${to}. Message ID: ${info.messageId}`);
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email OTP à ${to}:`, error);
+      console.log(`[DEV] Code OTP d'inscription pour ${to}: ${otp}`);
+      throw new Error('Erreur lors de l\'envoi de l\'email. Veuillez réessayer plus tard.');
+    }
+  }
+
+  private getPasswordSetupEmailTemplate(
+    userName: string,
+    setupLink: string,
+    setupLinkMobile?: string,
+  ): string {
+    const mobileSection = setupLinkMobile
+      ? `
+    <p><strong>Sur l'app mobile</strong>, utilisez ce lien (ouvre l'app Secure Link) :</p>
+    <p style="word-break: break-all; font-family: monospace; font-size: 12px; padding: 10px; border: 1px solid #000;">${setupLinkMobile}</p>
+`
+      : '';
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Créez votre mot de passe</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #000; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h1>Secure Link</h1>
+    
+    <h2>Créez votre mot de passe</h2>
+    
+    <p>Bonjour <strong>${userName}</strong>,</p>
+    
+    <p>Votre inscription sur Secure Link a été validée avec succès. Pour finaliser votre compte, créez votre mot de passe :</p>
+    
+    <p><strong>Sur ordinateur (navigateur)</strong> :</p>
+    <div style="text-align: center; margin: 20px 0;">
+        <a href="${setupLink}" style="display: inline-block; padding: 15px 30px; background-color: #000; color: #fff; text-decoration: none; border-radius: 5px; font-weight: bold;">Créer mon mot de passe</a>
+    </div>
+    <p style="word-break: break-all; font-family: monospace; font-size: 12px; padding: 10px; border: 1px solid #000;">${setupLink}</p>
+    ${mobileSection}
+    <p><strong>Ce lien expire dans 24 heures.</strong></p>
+    
+    <p>Si vous n'avez pas demandé cette inscription, veuillez ignorer cet email.</p>
+    
+    <hr style="border: none; border-top: 1px solid #000; margin: 30px 0;">
+    
+    <p style="font-size: 12px; text-align: center; margin: 0;">
+        Cet email a été envoyé automatiquement. Merci de ne pas y répondre.<br>
+        Si vous avez des questions, contactez le support Secure Link.
+    </p>
+</body>
+</html>
+    `;
+  }
+
+  private getRegistrationOtpEmailTemplate(otp: string, userName?: string): string {
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code de vérification - Inscription</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #000; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <h1>Secure Link</h1>
+    
+    <h2>Code de vérification</h2>
+    
+    ${userName ? `<p>Bonjour <strong>${userName}</strong>,</p>` : '<p>Bonjour,</p>'}
+    
+    <p>Pour finaliser votre inscription sur Secure Link, veuillez utiliser le code de vérification suivant :</p>
+    
+    <div style="padding: 20px; text-align: center; margin: 30px 0; border: 1px solid #000;">
+        <p style="margin: 0; font-size: 14px;">Code de vérification</p>
+        <p style="margin: 10px 0 0 0; font-size: 36px; font-weight: bold; font-family: monospace; letter-spacing: 8px;">${otp}</p>
+    </div>
+    
+    <p><strong>Ce code expire dans 10 minutes.</strong></p>
+    
+    <p>Si vous n'avez pas demandé cette inscription, veuillez ignorer cet email.</p>
+    
+    <hr style="border: none; border-top: 1px solid #000; margin: 30px 0;">
+    
+    <p style="font-size: 12px; text-align: center; margin: 0;">
+        Cet email a été envoyé automatiquement. Merci de ne pas y répondre.
+    </p>
+</body>
+</html>
+    `;
+  }
 }
 

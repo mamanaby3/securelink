@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: ${DB_NAME:-securelink}
     ports:
-      - "5434:5432"  # Port externe 5434, port interne 5432
+      - "5435:5432"  # Port externe 5434, port interne 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -58,8 +58,19 @@ services:
       EMAIL_USER: ${EMAIL_USER}
       EMAIL_PASSWORD: ${EMAIL_PASSWORD}
       
-      # CORS
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://86.106.181.31,http://localhost:3000}
+      # SMS (LAM SMS - L'Afrique Mobile)
+      LAM_SMS_URL: ${LAM_SMS_URL}
+      LAM_SMS_ACCOUNT_ID: ${LAM_SMS_ACCOUNT_ID}
+      LAM_SMS_PASSWORD: ${LAM_SMS_PASSWORD}
+      LAM_SMS_SENDER: ${LAM_SMS_SENDER}
+      
+      # Lien email "Créer mon mot de passe" → {FRONTEND_URL}/auth/setup-password?token=xxx
+      FRONTEND_URL: ${FRONTEND_URL:-https://secure.innovimpactdev.cloud}
+      # Deep link mobile (optionnel) → ex: securelink://create-password?token=xxx
+      MOBILE_DEEP_LINK_URL: ${MOBILE_DEEP_LINK_URL:-}
+      
+      # CORS (origines autorisées pour le front, ex. https://secure.innovimpactdev.cloud)
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://secure.innovimpactdev.cloud,http://86.106.181.31,http://localhost:4200}
     depends_on:
       postgres:
         condition: service_healthy

@@ -32,6 +32,7 @@ export class User {
     @Column({ type: 'varchar', length: 255 })
     password: string;
 
+    /** Numéro unique par compte (contrainte appliquée via migration UQ_users_phone). */
     @Column({ type: 'varchar', length: 50, nullable: true })
     phone?: string;
 
@@ -92,6 +93,12 @@ export class User {
 
     @Column({ type: 'varchar', length: 500, nullable: true })
     profilePicture?: string;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    passwordSetupToken?: string;
+
+    @Column({ type: 'timestamp', nullable: true })
+    passwordSetupTokenExpiry?: Date;
 
     @CreateDateColumn()
     createdAt: Date;

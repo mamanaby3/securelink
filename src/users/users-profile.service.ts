@@ -326,10 +326,38 @@ export class UsersProfileService {
             };
         });
 
-        return {
-            completion,
-            requiredDocuments: requiredDocumentsInfo,
-            uploadedDocuments: documents.map((doc) => ({
+        // Construire la liste des documents uploadés avec URL d'aperçu (présignée)
+        const uploadedDocuments: Array<{
+            id: string;
+            type: string;
+            label: string;
+            fileName: string;
+            status: string;
+            issueDate: Date | null;
+            expirationDate: Date | null;
+            createdAt: Date;
+            previewUrl?: string | null;
+            mimeType?: string | null;
+        }> = [];
+        for (const doc of documents) {
+            let previewUrl: string | null = null;
+            if (doc.filePath) {
+                let minioPath: string | null = null;
+                if (doc.filePath.startsWith('documents/')) {
+                    minioPath = doc.filePath;
+                } else if (doc.filePath.includes('/documents/')) {
+                    const urlMatch = doc.filePath.match(/\/documents\/[^?]+/);
+                    if (urlMatch) minioPath = urlMatch[0].substring(1);
+                }
+                if (minioPath) {
+                    try {
+                        previewUrl = await this.minioService.getPresignedUrl(minioPath);
+                    } catch (err) {
+                        this.logger.warn(`[Completion] Presigned URL for ${minioPath}:`, err);
+                    }
+                }
+            }
+            uploadedDocuments.push({
                 id: doc.id,
                 type: doc.type,
                 label: this.getDocumentLabel(doc.type),
@@ -338,7 +366,15 @@ export class UsersProfileService {
                 issueDate: doc.issueDate,
                 expirationDate: doc.expirationDate,
                 createdAt: doc.createdAt,
-            })),
+                previewUrl: previewUrl || undefined,
+                mimeType: doc.mimeType || undefined,
+            });
+        }
+
+        return {
+            completion,
+            requiredDocuments: requiredDocumentsInfo,
+            uploadedDocuments,
         };
     }
 
@@ -537,6 +573,53 @@ export class UsersProfileService {
     }
 
     /**
+     * Récupère les documents du profil avec une URL d'aperçu fraîche (présignée).
+     * Utilisé par le front pour afficher les miniatures (images et 1re page PDF).
+     */
+    async getUserDocumentsWithPreviews(userId: string): Promise<Array<Record<string, unknown> & { id: string; documentTypeId?: string; fileName: string; mimeType: string; previewUrl?: string | null }>> {
+        const documents = await this.getUserDocuments(userId);
+        const result: Array<Record<string, unknown> & { id: string; documentTypeId?: string; fileName: string; mimeType: string; previewUrl?: string | null }> = [];
+        for (const doc of documents) {
+            let previewUrl: string | null = null;
+            if (doc.filePath) {
+                let minioPath: string | null = null;
+                if (doc.filePath.startsWith('documents/')) {
+                    minioPath = doc.filePath;
+                } else if (doc.filePath.includes('/documents/')) {
+                    const urlMatch = doc.filePath.match(/\/documents\/[^?]+/);
+                    if (urlMatch) minioPath = urlMatch[0].substring(1);
+                }
+                if (minioPath) {
+                    try {
+                        previewUrl = await this.minioService.getPresignedUrl(minioPath);
+                    } catch (err) {
+                        this.logger.warn(`[Profile documents] Presigned URL for ${minioPath}:`, err);
+                    }
+                }
+            }
+            result.push({
+                id: doc.id,
+                userId: doc.userId,
+                type: doc.type,
+                documentTypeId: doc.documentTypeId ?? undefined,
+                fileName: doc.fileName,
+                filePath: doc.filePath,
+                fileSize: doc.fileSize,
+                mimeType: doc.mimeType,
+                issueDate: doc.issueDate,
+                expirationDate: doc.expirationDate,
+                status: doc.status,
+                rejectionReason: doc.rejectionReason,
+                isVerified: doc.isVerified,
+                createdAt: doc.createdAt,
+                updatedAt: doc.updatedAt,
+                previewUrl: previewUrl ?? undefined,
+            });
+        }
+        return result;
+    }
+
+    /**
      * Récupère tous les documents (pour admin) avec filtres optionnels
      */
     async findAllDocuments(
@@ -649,6 +732,30 @@ export class UsersProfileService {
         }
 
         await this.userDocumentRepository.remove(document);
+    }
+
+    /**
+     * Récupère le fichier d'un document (pour aperçu/miniature via proxy, évite CORS).
+     */
+    async getDocumentFile(userId: string, documentId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+        const document = await this.userDocumentRepository.findOne({
+            where: { id: documentId, userId },
+        });
+        if (!document) {
+            throw new NotFoundException('Document non trouvé');
+        }
+        let minioPath: string | null = null;
+        if (document.filePath.startsWith('documents/')) {
+            minioPath = document.filePath;
+        } else if (document.filePath.includes('/documents/')) {
+            const urlMatch = document.filePath.match(/\/documents\/[^?]+/);
+            if (urlMatch) minioPath = urlMatch[0].substring(1);
+        }
+        if (!minioPath) {
+            throw new NotFoundException('Fichier non disponible');
+        }
+        const buffer = await this.minioService.getFile(minioPath);
+        return { buffer, mimeType: document.mimeType || 'application/octet-stream' };
     }
 
     /**

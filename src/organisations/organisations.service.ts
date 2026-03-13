@@ -52,34 +52,54 @@ export class OrganisationsService {
   /**
    * Sauvegarde le logo d'une organisation dans un dossier
    */
-  async saveLogo(logo: { buffer: Buffer; originalname: string; mimetype: string; size: number }): Promise<string> {
+  async saveLogo(logo: { buffer?: Buffer; originalname?: string; mimetype?: string; size?: number }): Promise<string> {
+    if (!logo || !Buffer.isBuffer(logo.buffer)) {
+      throw new BadRequestException(
+        'Fichier logo invalide. Envoyez le formulaire en multipart/form-data avec le champ "logo" contenant une image.',
+      );
+    }
+
     // Vérifier le type de fichier
-    if (!this.allowedLogoTypes.includes(logo.mimetype)) {
+    if (!logo.mimetype || !this.allowedLogoTypes.includes(logo.mimetype)) {
       throw new BadRequestException(
         'Type de fichier non autorisé. Formats acceptés : JPG, PNG, WEBP',
       );
     }
 
     // Vérifier la taille du fichier
-    if (logo.size > this.maxLogoSize) {
+    if (logo.size == null || logo.size > this.maxLogoSize) {
       throw new BadRequestException('Fichier trop volumineux. Taille maximale : 5 MB');
     }
 
-    // Générer un nom de fichier unique
-    const fileExtension = path.extname(logo.originalname) || '.jpg';
+    // S'assurer que le dossier existe et est accessible
+    try {
+      if (!fs.existsSync(this.logosDir)) {
+        fs.mkdirSync(this.logosDir, { recursive: true });
+        this.logger.log(`Dossier logos créé : ${this.logosDir}`);
+      }
+    } catch (dirError: any) {
+      this.logger.error(`Impossible de créer le dossier logos : ${dirError.message}`);
+      throw new BadRequestException(
+        `Impossible d'accéder au dossier de stockage : ${dirError.code === 'EACCES' ? 'permissions insuffisantes' : dirError.message}`,
+      );
+    }
+
+    const fileExtension = path.extname(logo.originalname || '') || '.jpg';
     const fileName = `logo-${Date.now()}-${Math.random().toString(36).substring(7)}${fileExtension}`;
     const filePath = path.join(this.logosDir, fileName);
 
-    // Sauvegarder le fichier
     try {
       fs.writeFileSync(filePath, logo.buffer);
       this.logger.log(`Logo sauvegardé : ${filePath}`);
-
-      // Retourner le chemin relatif pour stockage en base de données
       return `logos/${fileName}`;
-    } catch (error) {
-      this.logger.error(`Erreur lors de la sauvegarde du logo : ${error.message}`);
-      throw new BadRequestException('Erreur lors de la sauvegarde du logo');
+    } catch (error: any) {
+      this.logger.error(`Erreur lors de la sauvegarde du logo : ${error.message}`, error.stack);
+      const hint = error.code === 'EACCES'
+        ? ' Vérifiez les permissions du dossier uploads sur le serveur.'
+        : error.code === 'ENOENT'
+          ? ' Le dossier uploads/logos n\'existe pas ou n\'est pas accessible.'
+          : '';
+      throw new BadRequestException(`Erreur lors de la sauvegarde du logo.${hint}`);
     }
   }
 
