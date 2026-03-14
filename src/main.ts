@@ -124,8 +124,8 @@ async function bootstrap() {
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api', app, document);
-    logger.log('  Swagger documentation disponible sur /api');
+    SwaggerModule.setup('docs', app, document);
+    logger.log('  Swagger documentation disponible sur /docs');
   } else {
     logger.warn('  Swagger désactivé (en prod : définir ENABLE_SWAGGER=true pour l’activer)');
   }
@@ -136,8 +136,8 @@ async function bootstrap() {
   logger.log(`  Application démarrée sur le port ${port}`);
   logger.log(`  Environnement: ${isProduction ? 'PRODUCTION' : 'DÉVELOPPEMENT'}`);
   
-  if (!isProduction) {
-    logger.log(`  Swagger: http://localhost:${port}/api`);
+  if (enableSwagger) {
+    logger.log(`  Swagger: http://localhost:${port}/docs`);
   }
 }
 

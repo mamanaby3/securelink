@@ -8,6 +8,13 @@ import { CreateLinkDto } from './dto/create-link.dto';
 export class AppController {
   constructor(private readonly appService: AppService) {}
 
+  @Get('health')
+  @ApiOperation({ summary: 'Health check (pour proxy / load balancer)' })
+  @ApiResponse({ status: 200, description: 'API is up' })
+  health(): { status: string } {
+    return { status: 'ok' };
+  }
+
   @Get()
   @ApiOperation({ summary: 'Get welcome message' })
   @ApiResponse({ status: 200, description: 'Returns a welcome message' })
