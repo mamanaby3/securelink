@@ -95,6 +95,7 @@ export class DocumentExpirationService {
   private getDocumentLabel(type: DocumentType): string {
     const labels: Record<DocumentType, string> = {
       [DocumentType.CARTE_IDENTITE]: 'Carte d\'identité',
+      [DocumentType.SELFIE]: 'Selfie',
       [DocumentType.CERTIFICAT_NATIONALITE]: 'Certificat de nationalité',
       [DocumentType.EXTRAIT_NAISSANCE]: 'Extrait de naissance',
       [DocumentType.AUTRE]: 'Document',

@@ -93,6 +93,8 @@ export class UsersProfileService {
 
         if (titleUpper.includes('CARTE') && titleUpper.includes('IDENTITE')) {
             return DocumentType.CARTE_IDENTITE;
+        } else if (titleUpper.includes('SELFIE')) {
+            return DocumentType.SELFIE;
         } else if (titleUpper.includes('CERTIFICAT') && titleUpper.includes('NATIONALITE')) {
             return DocumentType.CERTIFICAT_NATIONALITE;
         } else if (titleUpper.includes('EXTRAIT') && titleUpper.includes('NAISSANCE')) {
@@ -744,6 +746,24 @@ export class UsersProfileService {
         if (!document) {
             throw new NotFoundException('Document non trouvé');
         }
+        return this.getDocumentFileBuffer(document);
+    }
+
+    /**
+     * Récupère le fichier d'un document par ID (pour l'admin, sans vérification userId).
+     * Utilisé par la page de vérification des documents (admin).
+     */
+    async getDocumentFileForAdmin(documentId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+        const document = await this.userDocumentRepository.findOne({
+            where: { id: documentId },
+        });
+        if (!document) {
+            throw new NotFoundException('Document non trouvé');
+        }
+        return this.getDocumentFileBuffer(document);
+    }
+
+    private async getDocumentFileBuffer(document: UserDocument): Promise<{ buffer: Buffer; mimeType: string }> {
         let minioPath: string | null = null;
         if (document.filePath.startsWith('documents/')) {
             minioPath = document.filePath;
@@ -799,6 +819,7 @@ export class UsersProfileService {
     private getDocumentLabel(type: DocumentType): string {
         const labels = {
             [DocumentType.CARTE_IDENTITE]: 'Carte d\'identité',
+            [DocumentType.SELFIE]: 'Selfie',
             [DocumentType.CERTIFICAT_NATIONALITE]: 'Certificat de nationalité',
             [DocumentType.EXTRAIT_NAISSANCE]: 'Extrait de naissance',
         };

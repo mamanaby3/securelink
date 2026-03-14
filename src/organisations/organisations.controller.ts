@@ -14,6 +14,7 @@ import {
     UseInterceptors,
     BadRequestException,
 } from '@nestjs/common';
+import { StreamableFile } from '@nestjs/common';
 import {
     ApiTags,
     ApiOperation,
@@ -210,6 +211,22 @@ export class OrganisationsController {
     ) {
         const isActiveBool = isActive === 'true' ? true : isActive === 'false' ? false : undefined;
         return this.organisationsService.findAll(sector, isActiveBool, search);
+    }
+
+    @Get(':id/logo')
+    @Roles(UserRole.ADMIN, UserRole.ORGANISATION, UserRole.CLIENT)
+    @OrganisationRoles(OrganisationRole.SUPERVISEUR, OrganisationRole.ADMINISTRATION)
+    @ApiTags('Admin', 'Organisations')
+    @ApiOperation({
+        summary: 'Récupérer le logo d\'une organisation',
+        description: 'Retourne le fichier image du logo. Utiliser cet endpoint pour afficher le logo (évite les problèmes CORS par rapport à /uploads).',
+    })
+    @ApiParam({ name: 'id', description: 'ID de l\'organisation' })
+    @ApiResponse({ status: 200, description: 'Fichier image du logo' })
+    @ApiResponse({ status: 404, description: 'Organisation ou logo non trouvé' })
+    async getLogo(@Param('id') id: string) {
+        const { buffer, mimeType } = await this.organisationsService.getLogoFile(id);
+        return new StreamableFile(buffer, { type: mimeType });
     }
 
     @Get(':id')

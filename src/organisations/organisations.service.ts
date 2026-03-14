@@ -299,6 +299,34 @@ export class OrganisationsService {
     return org;
   }
 
+  /**
+   * Retourne le fichier logo d'une organisation (pour affichage via API, évite CORS).
+   */
+  async getLogoFile(organisationId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+    const org = await this.organisationRepository.findOne({
+      where: { id: organisationId },
+      select: ['id', 'logo'],
+    });
+    if (!org || !org.logo?.trim()) {
+      throw new NotFoundException('Logo non trouvé');
+    }
+    const fileName = path.basename(org.logo);
+    const filePath = path.join(this.logosDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      throw new NotFoundException('Fichier logo introuvable');
+    }
+    const buffer = fs.readFileSync(filePath);
+    const ext = path.extname(fileName).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+    };
+    const mimeType = mimeTypes[ext] || 'image/jpeg';
+    return { buffer, mimeType };
+  }
+
   async update(id: string, updateOrganisationDto: UpdateOrganisationDto): Promise<Organisation> {
     const organisation = await this.findOne(id);
 

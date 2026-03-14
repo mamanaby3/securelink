@@ -12,6 +12,7 @@ import { User } from '../../auth/entities/user.entity';
 
 export enum DocumentType {
   CARTE_IDENTITE = 'CARTE_IDENTITE',
+  SELFIE = 'SELFIE',
   CERTIFICAT_NATIONALITE = 'CERTIFICAT_NATIONALITE',
   EXTRAIT_NAISSANCE = 'EXTRAIT_NAISSANCE',
   AUTRE = 'AUTRE',

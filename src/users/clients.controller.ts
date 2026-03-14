@@ -336,6 +336,7 @@ export class ClientsController {
   private getDocumentTitle(type: string): string {
     const titles: { [key: string]: string } = {
       'CARTE_IDENTITE': 'Carte d\'identité',
+      'SELFIE': 'Selfie',
       'CERTIFICAT_NATIONALITE': 'Certificat de nationalité',
       'EXTRAIT_NAISSANCE': 'Extrait de naissance',
       'AUTRE': 'Autre document',

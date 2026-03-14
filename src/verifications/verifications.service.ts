@@ -8,7 +8,7 @@ import { CreateFromDocumentDto } from './dto/create-from-document.dto';
 import { Verification, VerificationStatus } from './entities/verification.entity';
 import { Sector } from '../organisations/dto/create-organisation.dto';
 import { User } from '../auth/entities/user.entity';
-import { UserDocument, DocumentStatus } from '../users/entities/user-document.entity';
+import { UserDocument, DocumentStatus, DocumentType } from '../users/entities/user-document.entity';
 import { EmailService } from '../common/services/email.service';
 
 @Injectable()
@@ -76,7 +76,10 @@ export class VerificationsService {
       .getMany();
   }
 
-  async findOne(id: string): Promise<Verification> {
+  async findOne(id: string): Promise<Verification & {
+    document?: { id: string; type: string; fileName: string; mimeType: string };
+    selfieDocument?: { id: string; type: string; fileName: string; mimeType: string };
+  }> {
     const verification = await this.verificationRepository.findOne({
       where: { id },
       relations: ['client', 'request'],
@@ -84,7 +87,35 @@ export class VerificationsService {
     if (!verification) {
       throw new NotFoundException('Vérification non trouvée');
     }
-    return verification;
+    const document = await this.userDocumentRepository.findOne({
+      where: { id: verification.documentId },
+    });
+    const result = { ...verification } as Verification & {
+      document?: { id: string; type: string; fileName: string; mimeType: string };
+      selfieDocument?: { id: string; type: string; fileName: string; mimeType: string };
+    };
+    if (document) {
+      result.document = {
+        id: document.id,
+        type: document.type,
+        fileName: document.fileName,
+        mimeType: document.mimeType,
+      };
+    }
+    // Retourner aussi le selfie du même client pour que l'admin voie CNI + selfie dans le détail
+    const selfieDoc = await this.userDocumentRepository.findOne({
+      where: { userId: verification.clientId, type: DocumentType.SELFIE },
+      order: { createdAt: 'DESC' },
+    });
+    if (selfieDoc) {
+      result.selfieDocument = {
+        id: selfieDoc.id,
+        type: selfieDoc.type,
+        fileName: selfieDoc.fileName,
+        mimeType: selfieDoc.mimeType,
+      };
+    }
+    return result;
   }
 
   /**

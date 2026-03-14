@@ -211,6 +211,22 @@ export class UsersController {
     return this.usersService.getStatistics();
   }
 
+  @Get('admin/documents/:documentId/file')
+  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiTags('Admin')
+  @ApiOperation({
+    summary: 'Fichier d’un document (admin – vérifications)',
+    description: 'Retourne le fichier d’un document pour affichage dans la page de vérification. **Rôle requis : ADMIN**',
+  })
+  @ApiParam({ name: 'documentId', description: 'ID du document (UserDocument)' })
+  @ApiResponse({ status: 200, description: 'Fichier binaire' })
+  @ApiResponse({ status: 404, description: 'Document non trouvé' })
+  async getDocumentFileAdmin(@Param('documentId') documentId: string) {
+    const { buffer, mimeType } = await this.usersProfileService.getDocumentFileForAdmin(documentId);
+    return new StreamableFile(buffer, { type: mimeType });
+  }
+
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.ORGANISATION)
   @OrganisationRoles(OrganisationRole.SUPERVISEUR, OrganisationRole.ADMINISTRATION)
