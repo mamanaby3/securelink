@@ -19,18 +19,27 @@ export class MinioService implements OnModuleInit {
       return;
     }
 
-    // Extraire le hostname de l'endpoint (enlever https:// ou http://)
-    const hostname = endpoint.replace(/^https?:\/\//, '');
+    // Parser l'URL pour supporter https://host, https://host:9443, http://host:9000
+    const useSSL = endpoint.toLowerCase().startsWith('https');
+    let hostname = endpoint.replace(/^https?:\/\//, '').split('/')[0];
+    let port: number;
+    if (hostname.includes(':')) {
+      const parts = hostname.split(':');
+      hostname = parts[0];
+      port = parseInt(parts[1], 10) || (useSSL ? 443 : 9000);
+    } else {
+      port = useSSL ? 443 : 9000;
+    }
 
     this.minioClient = new Minio.Client({
       endPoint: hostname,
-      port: 443,
-      useSSL: true,
+      port,
+      useSSL,
       accessKey,
       secretKey,
     });
 
-    this.logger.log('MinIO client initialized');
+    this.logger.log(`MinIO client initialized (${hostname}:${port}, SSL: ${useSSL})`);
   }
 
   async onModuleInit() {

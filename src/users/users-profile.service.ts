@@ -816,10 +816,13 @@ export class UsersProfileService {
         try {
             await this.minioService.uploadFile(minioFileName, file.buffer, file.mimetype);
         } catch (err) {
-            this.logger.error(`Upload identity document (MinIO): ${err?.message}`, err?.stack);
-            throw new ServiceUnavailableException(
-                'Stockage des fichiers indisponible. Vérifiez la configuration MinIO (MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY).',
-            );
+            const errMsg = err?.message || String(err);
+            this.logger.error(`Upload identity document (MinIO): ${errMsg}`, err?.stack);
+            throw new ServiceUnavailableException({
+                message: 'Stockage des fichiers indisponible.',
+                error: errMsg,
+                hint: 'Vérifiez MINIO_ENDPOINT, accès réseau depuis le serveur vers MinIO, et identifiants.',
+            });
         }
 
         if (existing) {
