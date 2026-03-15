@@ -874,7 +874,7 @@ Chaque type indique :
   @ApiResponse({ status: 400, description: 'Fichier invalide ou kind invalide' })
   async uploadIdentityDocument(
     @CurrentUser() user: any,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: any,
     @Body() dto: UploadIdentityDocumentDto,
   ) {
     if (!file) throw new BadRequestException('Fichier requis');
