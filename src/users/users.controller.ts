@@ -878,6 +878,9 @@ Chaque type indique :
     @Body() dto: UploadIdentityDocumentDto,
   ) {
     if (!file) throw new BadRequestException('Fichier requis');
+    if (!dto?.kind || !['RECTO', 'VERSO', 'SELFIE'].includes(dto.kind)) {
+      throw new BadRequestException('kind est requis : RECTO, VERSO ou SELFIE');
+    }
     return this.usersProfileService.uploadIdentityDocument(user.userId, file, dto.kind);
   }
 

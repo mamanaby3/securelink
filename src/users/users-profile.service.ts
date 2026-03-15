@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ServiceUnavailableException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
@@ -791,11 +791,15 @@ export class UsersProfileService {
 
     async uploadIdentityDocument(
         userId: string,
-        file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+        file: { buffer?: Buffer; originalname?: string; mimetype: string; size: number },
         kind: IdentityDocumentKind,
     ): Promise<UserIdentityDocument> {
         const user = await this.userRepository.findOne({ where: { id: userId } });
         if (!user) throw new NotFoundException('Utilisateur non trouvé');
+        if (!file || !file.buffer || !Buffer.isBuffer(file.buffer)) {
+            throw new BadRequestException('Fichier requis ou format invalide (envoi multipart avec champ "file")');
+        }
+        const originalname = file.originalname || 'document';
         if (!this.allowedMimeTypes.includes(file.mimetype)) {
             throw new BadRequestException('Type de fichier non autorisé. Formats acceptés : PDF, JPG, PNG');
         }
@@ -805,10 +809,19 @@ export class UsersProfileService {
         const existing = await this.userIdentityDocumentRepository.findOne({
             where: { userId, kind },
         });
-        const fileExtension = path.extname(file.originalname);
+        const fileExtension = path.extname(originalname) || '.bin';
         const fileName = `identity-${userId}-${kind}-${Date.now()}${fileExtension}`;
         const minioFileName = `identity-documents/${fileName}`;
-        await this.minioService.uploadFile(minioFileName, file.buffer, file.mimetype);
+
+        try {
+            await this.minioService.uploadFile(minioFileName, file.buffer, file.mimetype);
+        } catch (err) {
+            this.logger.error(`Upload identity document (MinIO): ${err?.message}`, err?.stack);
+            throw new ServiceUnavailableException(
+                'Stockage des fichiers indisponible. Vérifiez la configuration MinIO (MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY).',
+            );
+        }
+
         if (existing) {
             if (existing.filePath.startsWith('identity-documents/')) {
                 try {
