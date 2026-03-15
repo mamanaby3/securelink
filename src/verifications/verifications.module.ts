@@ -6,9 +6,10 @@ import { Verification } from './entities/verification.entity';
 import { User } from '../auth/entities/user.entity';
 import { UserDocument } from '../users/entities/user-document.entity';
 import { UserIdentityDocument } from '../users/entities/user-identity-document.entity';
+import { DocumentType } from '../documents/entities/document-type.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Verification, User, UserDocument, UserIdentityDocument])],
+  imports: [TypeOrmModule.forFeature([Verification, User, UserDocument, UserIdentityDocument, DocumentType])],
   controllers: [VerificationsController],
   providers: [VerificationsService],
   exports: [VerificationsService],

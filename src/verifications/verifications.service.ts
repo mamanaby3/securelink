@@ -8,12 +8,15 @@ import { CreateFromDocumentDto } from './dto/create-from-document.dto';
 import { Verification, VerificationStatus } from './entities/verification.entity';
 import { Sector } from '../organisations/dto/create-organisation.dto';
 import { User } from '../auth/entities/user.entity';
-import { UserDocument, DocumentStatus, DocumentType } from '../users/entities/user-document.entity';
+import { UserDocument, DocumentStatus, DocumentType as DocumentTypeEnum } from '../users/entities/user-document.entity';
 import { EmailService } from '../common/services/email.service';
 import { UserIdentityDocument, IdentityDocumentKind } from '../users/entities/user-identity-document.entity';
+import { DocumentType } from '../documents/entities/document-type.entity';
 
 /** Infos minimales d’un document pour l’affichage (vérification d’identité) */
 export type IdentityDocumentInfo = { id: string; type: string; fileName: string; mimeType: string };
+
+export type VerificationListItem = Verification & { documentTypeTitle?: string };
 
 @Injectable()
 export class VerificationsService {
@@ -26,6 +29,8 @@ export class VerificationsService {
     private readonly userDocumentRepository: Repository<UserDocument>,
     @InjectRepository(UserIdentityDocument)
     private readonly userIdentityDocumentRepository: Repository<UserIdentityDocument>,
+    @InjectRepository(DocumentType)
+    private readonly documentTypeRepository: Repository<DocumentType>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -66,7 +71,7 @@ export class VerificationsService {
     return await this.verificationRepository.save(newVerification);
   }
 
-  async findAll(status?: string, sector?: string): Promise<Verification[]> {
+  async findAll(status?: string, sector?: string): Promise<VerificationListItem[]> {
     const queryBuilder = this.verificationRepository.createQueryBuilder('verification');
 
     if (status) {
@@ -77,9 +82,32 @@ export class VerificationsService {
       queryBuilder.andWhere('verification.sector = :sector', { sector });
     }
 
-    return await queryBuilder
+    const list = await queryBuilder
       .orderBy('verification.submittedAt', 'DESC')
       .getMany();
+
+    // Enrichir avec le titre du type de document (depuis document_types)
+    const result: VerificationListItem[] = [];
+    for (const v of list) {
+      const item: VerificationListItem = { ...v };
+      try {
+        const userDoc = await this.userDocumentRepository.findOne({
+          where: { id: v.documentId },
+        });
+        if (userDoc?.documentTypeId) {
+          const docType = await this.documentTypeRepository.findOne({
+            where: { id: userDoc.documentTypeId },
+          });
+          if (docType?.title) {
+            item.documentTypeTitle = docType.title;
+          }
+        }
+      } catch {
+        // ignorer si document ou type introuvable
+      }
+      result.push(item);
+    }
+    return result;
   }
 
   async findOne(id: string): Promise<Verification & {
@@ -119,7 +147,7 @@ export class VerificationsService {
     }
     // Selfie du client (legacy: par enum SELFIE)
     const selfieDoc = await this.userDocumentRepository.findOne({
-      where: { userId: verification.clientId, type: DocumentType.SELFIE },
+      where: { userId: verification.clientId, type: DocumentTypeEnum.SELFIE },
       order: { createdAt: 'DESC' },
     });
     if (selfieDoc) {
