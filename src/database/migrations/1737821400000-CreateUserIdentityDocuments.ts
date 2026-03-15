@@ -1,4 +1,4 @@
-import { MigrationInterface, QueryRunner, Table, TableIndex, TableForeignKey } from 'typeorm';
+import { MigrationInterface, QueryRunner, Table } from 'typeorm';
 
 export class CreateUserIdentityDocuments1737821400000 implements MigrationInterface {
   name = 'CreateUserIdentityDocuments1737821400000';
@@ -40,25 +40,22 @@ export class CreateUserIdentityDocuments1737821400000 implements MigrationInterf
       true,
     );
 
-    await queryRunner.createIndex(
-      'user_identity_documents',
-      new TableIndex({
-        name: 'UQ_user_identity_documents_userId_kind',
-        columnNames: ['userId', 'kind'],
-        isUnique: true,
-      }),
-    );
+    await queryRunner.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "UQ_user_identity_documents_userId_kind"
+      ON "user_identity_documents" ("userId", "kind")
+    `);
 
-    await queryRunner.createForeignKey(
-      'user_identity_documents',
-      new TableForeignKey({
-        name: 'FK_user_identity_documents_user',
-        columnNames: ['userId'],
-        referencedTableName: 'users',
-        referencedColumnNames: ['id'],
-        onDelete: 'CASCADE',
-      }),
-    );
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'FK_user_identity_documents_user'
+        ) THEN
+          ALTER TABLE "user_identity_documents"
+          ADD CONSTRAINT "FK_user_identity_documents_user"
+          FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE;
+        END IF;
+      END $$;
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
