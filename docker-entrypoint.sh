@@ -10,5 +10,12 @@ if [ -n "${DB_HOST}" ]; then
   echo "PostgreSQL is ready."
 fi
 
+# Exécuter les migrations TypeORM avant de démarrer l'app (Dokploy / Docker)
+if [ -n "${DB_HOST}" ]; then
+  echo "Running database migrations..."
+  NODE_ENV=production npx typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts
+  echo "Migrations done."
+fi
+
 # Démarrer l'application NestJS
 exec node dist/main.js
