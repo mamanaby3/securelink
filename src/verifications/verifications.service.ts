@@ -122,49 +122,89 @@ export class VerificationsService {
   }> {
     const verification = await this.verificationRepository.findOne({
       where: { id },
-      relations: ['client', 'request'],
+      relations: ['client'],
     });
     if (!verification) {
       throw new NotFoundException('Vérification non trouvée');
     }
-    const document = await this.userDocumentRepository.findOne({
-      where: { id: verification.documentId },
-    });
-    const result = { ...verification } as Verification & {
+    const result = {
+      id: verification.id,
+      documentId: verification.documentId,
+      documentType: verification.documentType,
+      clientId: verification.clientId,
+      clientName: verification.clientName,
+      sector: verification.sector,
+      status: verification.status,
+      score: verification.score,
+      aiResults: verification.aiResults,
+      humanVerification: verification.humanVerification,
+      requestId: verification.requestId,
+      submittedAt: verification.submittedAt,
+      validatedAt: verification.validatedAt,
+      createdAt: verification.createdAt,
+      updatedAt: verification.updatedAt,
+      client: verification.client
+        ? {
+            id: verification.client.id,
+            name: verification.client.name,
+            firstName: verification.client.firstName,
+            lastName: verification.client.lastName,
+            email: verification.client.email,
+            phone: verification.client.phone,
+          }
+        : undefined,
+    } as Verification & {
       document?: IdentityDocumentInfo;
       selfieDocument?: IdentityDocumentInfo;
       identityRectoDocument?: IdentityDocumentInfo;
       identityVersoDocument?: IdentityDocumentInfo;
       identitySelfieDocument?: IdentityDocumentInfo;
     };
-    if (document) {
-      result.document = {
-        id: document.id,
-        type: document.type,
-        fileName: document.fileName,
-        mimeType: document.mimeType,
-      };
+
+    try {
+      const document = await this.userDocumentRepository.findOne({
+        where: { id: verification.documentId },
+      });
+      if (document) {
+        result.document = {
+          id: document.id,
+          type: String(document.type),
+          fileName: document.fileName,
+          mimeType: document.mimeType,
+        };
+      }
+    } catch {
+      // Document introuvable ou erreur
     }
-    // Selfie du client (legacy: par enum SELFIE)
-    const selfieDoc = await this.userDocumentRepository.findOne({
-      where: { userId: verification.clientId, type: DocumentTypeEnum.SELFIE },
-      order: { createdAt: 'DESC' },
-    });
-    if (selfieDoc) {
-      result.selfieDocument = {
-        id: selfieDoc.id,
-        type: selfieDoc.type,
-        fileName: selfieDoc.fileName,
-        mimeType: selfieDoc.mimeType,
-      };
+
+    try {
+      const selfieDoc = await this.userDocumentRepository.findOne({
+        where: { userId: verification.clientId, type: DocumentTypeEnum.SELFIE },
+        order: { createdAt: 'DESC' },
+      });
+      if (selfieDoc) {
+        result.selfieDocument = {
+          id: selfieDoc.id,
+          type: String(selfieDoc.type),
+          fileName: selfieDoc.fileName,
+          mimeType: selfieDoc.mimeType,
+        };
+      }
+    } catch {
+      // Selfie ou erreur
     }
     // Vérification d’identité : recto CNI, verso CNI, selfie (par types de documents créés par l’admin)
-    const identityDocs = await this.userIdentityDocumentRepository.find({
-      where: { userId: verification.clientId },
-    });
+    let identityDocs: UserIdentityDocument[] = [];
+    try {
+      identityDocs = await this.userIdentityDocumentRepository.find({
+        where: { userId: verification.clientId },
+      });
+    } catch {
+      // Table user_identity_documents absente ou erreur : ne pas faire échouer GET /verifications/:id
+    }
     const toDocInfo = (d: UserIdentityDocument): IdentityDocumentInfo => ({
       id: d.id,
-      type: d.kind,
+      type: String(d.kind),
       fileName: d.fileName,
       mimeType: d.mimeType,
     });
