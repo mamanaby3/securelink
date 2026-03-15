@@ -10,6 +10,10 @@ import { Sector } from '../organisations/dto/create-organisation.dto';
 import { User } from '../auth/entities/user.entity';
 import { UserDocument, DocumentStatus, DocumentType } from '../users/entities/user-document.entity';
 import { EmailService } from '../common/services/email.service';
+import { UserIdentityDocument, IdentityDocumentKind } from '../users/entities/user-identity-document.entity';
+
+/** Infos minimales d’un document pour l’affichage (vérification d’identité) */
+export type IdentityDocumentInfo = { id: string; type: string; fileName: string; mimeType: string };
 
 @Injectable()
 export class VerificationsService {
@@ -20,6 +24,8 @@ export class VerificationsService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserDocument)
     private readonly userDocumentRepository: Repository<UserDocument>,
+    @InjectRepository(UserIdentityDocument)
+    private readonly userIdentityDocumentRepository: Repository<UserIdentityDocument>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -77,8 +83,14 @@ export class VerificationsService {
   }
 
   async findOne(id: string): Promise<Verification & {
-    document?: { id: string; type: string; fileName: string; mimeType: string };
-    selfieDocument?: { id: string; type: string; fileName: string; mimeType: string };
+    document?: IdentityDocumentInfo;
+    selfieDocument?: IdentityDocumentInfo;
+    /** Face recto CNI (pour vérification humaine) */
+    identityRectoDocument?: IdentityDocumentInfo;
+    /** Face verso CNI (pour vérification humaine) */
+    identityVersoDocument?: IdentityDocumentInfo;
+    /** Selfie (pour vérification humaine) */
+    identitySelfieDocument?: IdentityDocumentInfo;
   }> {
     const verification = await this.verificationRepository.findOne({
       where: { id },
@@ -91,8 +103,11 @@ export class VerificationsService {
       where: { id: verification.documentId },
     });
     const result = { ...verification } as Verification & {
-      document?: { id: string; type: string; fileName: string; mimeType: string };
-      selfieDocument?: { id: string; type: string; fileName: string; mimeType: string };
+      document?: IdentityDocumentInfo;
+      selfieDocument?: IdentityDocumentInfo;
+      identityRectoDocument?: IdentityDocumentInfo;
+      identityVersoDocument?: IdentityDocumentInfo;
+      identitySelfieDocument?: IdentityDocumentInfo;
     };
     if (document) {
       result.document = {
@@ -102,7 +117,7 @@ export class VerificationsService {
         mimeType: document.mimeType,
       };
     }
-    // Retourner aussi le selfie du même client pour que l'admin voie CNI + selfie dans le détail
+    // Selfie du client (legacy: par enum SELFIE)
     const selfieDoc = await this.userDocumentRepository.findOne({
       where: { userId: verification.clientId, type: DocumentType.SELFIE },
       order: { createdAt: 'DESC' },
@@ -114,6 +129,25 @@ export class VerificationsService {
         fileName: selfieDoc.fileName,
         mimeType: selfieDoc.mimeType,
       };
+    }
+    // Vérification d’identité : recto CNI, verso CNI, selfie (par types de documents créés par l’admin)
+    const identityDocs = await this.userIdentityDocumentRepository.find({
+      where: { userId: verification.clientId },
+    });
+    const toDocInfo = (d: UserIdentityDocument): IdentityDocumentInfo => ({
+      id: d.id,
+      type: d.kind,
+      fileName: d.fileName,
+      mimeType: d.mimeType,
+    });
+    for (const d of identityDocs) {
+      if (d.kind === IdentityDocumentKind.RECTO) result.identityRectoDocument = toDocInfo(d);
+      else if (d.kind === IdentityDocumentKind.VERSO) result.identityVersoDocument = toDocInfo(d);
+      else if (d.kind === IdentityDocumentKind.SELFIE) result.identitySelfieDocument = toDocInfo(d);
+    }
+    // Si identitySelfieDocument pas trouvé par type mais selfieDocument existe, l’utiliser
+    if (!result.identitySelfieDocument && result.selfieDocument) {
+      result.identitySelfieDocument = result.selfieDocument;
     }
     return result;
   }

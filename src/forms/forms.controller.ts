@@ -31,6 +31,7 @@ import { Response } from 'express';
 import { FormsService } from './forms.service';
 import { CreateFormDto } from './dto/create-form.dto';
 import { UpdateFormFieldsDto } from './dto/update-form-fields.dto';
+import { UpdateFormStatusDto } from './dto/update-form-status.dto';
 import { FormStatus } from './entities/form.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -667,8 +668,8 @@ Permet de télécharger le PDF du formulaire. Ce PDF peut être :
   @ApiResponse({ status: 404, description: 'Formulaire non trouvé' })
   @ApiResponse({ status: 403, description: 'Accès refusé - Rôle ORGANISATION requis' })
   @ApiResponse({ status: 400, description: 'Statut invalide ou formulaire non activé' })
-  updateStatus(@Param('id') id: string, @Body('status') status: FormStatus) {
-    return this.formsService.updateStatus(id, status);
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateFormStatusDto) {
+    return this.formsService.updateStatus(id, dto.status);
   }
 
   @Patch(':id/activate')

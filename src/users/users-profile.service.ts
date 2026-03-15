@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { UserDocument, DocumentType, DocumentStatus } from './entities/user-document.entity';
+import { UserIdentityDocument, IdentityDocumentKind } from './entities/user-identity-document.entity';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { EmailService } from '../common/services/email.service';
 import { SecurityService } from '../security/security.service';
@@ -27,6 +28,8 @@ export class UsersProfileService {
         private userDocumentRepository: Repository<UserDocument>,
         @InjectRepository(DocumentTypeEntity)
         private documentTypeRepository: Repository<DocumentTypeEntity>,
+        @InjectRepository(UserIdentityDocument)
+        private userIdentityDocumentRepository: Repository<UserIdentityDocument>,
         private emailService: EmailService,
         private securityService: SecurityService,
         private minioService: MinioService,
@@ -93,7 +96,13 @@ export class UsersProfileService {
 
         if (titleUpper.includes('CARTE') && titleUpper.includes('IDENTITE')) {
             return DocumentType.CARTE_IDENTITE;
-        } else if (titleUpper.includes('SELFIE')) {
+        }
+        // Face recto/verso CNI (vérification d'identité)
+        if ((titleUpper.includes('CNI') || titleUpper.includes('IDENTITE')) &&
+            (titleUpper.includes('RECTO') || titleUpper.includes('VERSO') || titleUpper.includes('AVANT') || titleUpper.includes('ARRIERE') || titleUpper.includes('FACE'))) {
+            return DocumentType.CARTE_IDENTITE;
+        }
+        if (titleUpper.includes('SELFIE')) {
             return DocumentType.SELFIE;
         } else if (titleUpper.includes('CERTIFICAT') && titleUpper.includes('NATIONALITE')) {
             return DocumentType.CERTIFICAT_NATIONALITE;
@@ -776,6 +785,89 @@ export class UsersProfileService {
         }
         const buffer = await this.minioService.getFile(minioPath);
         return { buffer, mimeType: document.mimeType || 'application/octet-stream' };
+    }
+
+    // ─── Documents d'identité (recto, verso, selfie) – hors document_types ───
+
+    async uploadIdentityDocument(
+        userId: string,
+        file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+        kind: IdentityDocumentKind,
+    ): Promise<UserIdentityDocument> {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (!user) throw new NotFoundException('Utilisateur non trouvé');
+        if (!this.allowedMimeTypes.includes(file.mimetype)) {
+            throw new BadRequestException('Type de fichier non autorisé. Formats acceptés : PDF, JPG, PNG');
+        }
+        if (file.size > this.maxFileSize) {
+            throw new BadRequestException('Fichier trop volumineux. Taille maximale : 10 MB');
+        }
+        const existing = await this.userIdentityDocumentRepository.findOne({
+            where: { userId, kind },
+        });
+        const fileExtension = path.extname(file.originalname);
+        const fileName = `identity-${userId}-${kind}-${Date.now()}${fileExtension}`;
+        const minioFileName = `identity-documents/${fileName}`;
+        await this.minioService.uploadFile(minioFileName, file.buffer, file.mimetype);
+        if (existing) {
+            if (existing.filePath.startsWith('identity-documents/')) {
+                try {
+                    await this.minioService.deleteFile(existing.filePath);
+                } catch (e) {
+                    this.logger.warn(`Delete old identity doc ${existing.filePath}:`, e);
+                }
+            }
+            existing.fileName = fileName;
+            existing.filePath = minioFileName;
+            existing.fileSize = `${(file.size / 1024).toFixed(2)} KB`;
+            existing.mimeType = file.mimetype;
+            return await this.userIdentityDocumentRepository.save(existing);
+        }
+        const doc = this.userIdentityDocumentRepository.create({
+            userId,
+            kind,
+            fileName,
+            filePath: minioFileName,
+            fileSize: `${(file.size / 1024).toFixed(2)} KB`,
+            mimeType: file.mimetype,
+        });
+        return await this.userIdentityDocumentRepository.save(doc);
+    }
+
+    async getIdentityDocuments(userId: string): Promise<UserIdentityDocument[]> {
+        return await this.userIdentityDocumentRepository.find({
+            where: { userId },
+            order: { kind: 'ASC' },
+        });
+    }
+
+    async getIdentityDocumentFile(userId: string, documentId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+        const doc = await this.userIdentityDocumentRepository.findOne({
+            where: { id: documentId, userId },
+        });
+        if (!doc) throw new NotFoundException('Document non trouvé');
+        return this.getIdentityDocumentFileBuffer(doc);
+    }
+
+    async getIdentityDocumentFileForAdmin(documentId: string): Promise<{ buffer: Buffer; mimeType: string }> {
+        const doc = await this.userIdentityDocumentRepository.findOne({
+            where: { id: documentId },
+        });
+        if (!doc) throw new NotFoundException('Document non trouvé');
+        return this.getIdentityDocumentFileBuffer(doc);
+    }
+
+    private async getIdentityDocumentFileBuffer(doc: UserIdentityDocument): Promise<{ buffer: Buffer; mimeType: string }> {
+        let minioPath: string | null = null;
+        if (doc.filePath.startsWith('identity-documents/')) {
+            minioPath = doc.filePath;
+        } else if (doc.filePath.includes('/identity-documents/')) {
+            const m = doc.filePath.match(/\/identity-documents\/[^?]+/);
+            if (m) minioPath = m[0].substring(1);
+        }
+        if (!minioPath) throw new NotFoundException('Fichier non disponible');
+        const buffer = await this.minioService.getFile(minioPath);
+        return { buffer, mimeType: doc.mimeType || 'application/octet-stream' };
     }
 
     /**

@@ -7,6 +7,7 @@ import { UsersProfileService } from './users-profile.service';
 import { DocumentExpirationService } from './document-expiration.service';
 import { User } from '../auth/entities/user.entity';
 import { UserDocument } from './entities/user-document.entity';
+import { UserIdentityDocument } from './entities/user-identity-document.entity';
 import { Organisation } from '../organisations/entities/organisation.entity';
 import { RequestsModule } from '../requests/requests.module';
 import { SecurityModule } from '../security/security.module';
@@ -16,7 +17,7 @@ import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserDocument, Organisation, DocumentType]),
+    TypeOrmModule.forFeature([User, UserDocument, UserIdentityDocument, Organisation, DocumentType]),
     RequestsModule,
     SecurityModule,
     VerificationsModule,

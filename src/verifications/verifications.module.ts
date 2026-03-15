@@ -5,9 +5,10 @@ import { VerificationsController } from './verifications.controller';
 import { Verification } from './entities/verification.entity';
 import { User } from '../auth/entities/user.entity';
 import { UserDocument } from '../users/entities/user-document.entity';
+import { UserIdentityDocument } from '../users/entities/user-identity-document.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Verification, User, UserDocument])],
+  imports: [TypeOrmModule.forFeature([Verification, User, UserDocument, UserIdentityDocument])],
   controllers: [VerificationsController],
   providers: [VerificationsService],
   exports: [VerificationsService],

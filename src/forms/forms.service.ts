@@ -535,17 +535,18 @@ export class FormsService {
         let template: { label: string; url: string } | undefined;
 
         if (form.pdfFilePath && form.pdfFilePath.startsWith('forms/')) {
+            const templateLabel = form.pdfFileName || form.name || 'Modèle principal';
             try {
                 const exists = await this.minioService.fileExists(form.pdfFilePath);
                 if (exists) {
                     const url = await this.minioService.getPresignedUrl(form.pdfFilePath);
-                    template = { label: 'Modèle principal', url };
+                    template = { label: templateLabel, url };
                 } else {
-                    template = { label: 'Modèle principal', url: '' };
+                    template = { label: templateLabel, url: '' };
                 }
             } catch (e) {
                 this.logger.warn(`getFormPdfOptions: MinIO indisponible ou fichier absent pour template (${form.pdfFilePath}): ${e?.message || e}`);
-                template = { label: 'Modèle principal', url: '' };
+                template = { label: templateLabel, url: '' };
             }
         }
 

@@ -34,6 +34,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { CreateOrganisationUserDto } from './dto/create-organisation-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
+import { UploadIdentityDocumentDto } from './dto/upload-identity-document.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -224,6 +225,22 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'Document non trouvé' })
   async getDocumentFileAdmin(@Param('documentId') documentId: string) {
     const { buffer, mimeType } = await this.usersProfileService.getDocumentFileForAdmin(documentId);
+    return new StreamableFile(buffer, { type: mimeType });
+  }
+
+  @Get('admin/identity-documents/:documentId/file')
+  @Roles(UserRole.ADMIN, UserRole.ORGANISATION)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiTags('Admin')
+  @ApiOperation({
+    summary: 'Fichier d’un document d’identité (recto/verso/selfie)',
+    description: 'Retourne le fichier pour affichage dans la vérification. **Rôles : ADMIN, ORGANISATION**',
+  })
+  @ApiParam({ name: 'documentId', description: 'ID du document d’identité (UserIdentityDocument)' })
+  @ApiResponse({ status: 200, description: 'Fichier binaire' })
+  @ApiResponse({ status: 404, description: 'Document non trouvé' })
+  async getIdentityDocumentFileAdmin(@Param('documentId') documentId: string) {
+    const { buffer, mimeType } = await this.usersProfileService.getIdentityDocumentFileForAdmin(documentId);
     return new StreamableFile(buffer, { type: mimeType });
   }
 
@@ -830,6 +847,72 @@ Chaque type indique :
   async deleteDocument(@CurrentUser() user: any, @Param('documentId') documentId: string) {
     await this.usersProfileService.deleteDocument(user.userId, documentId);
     return { message: 'Document supprimé avec succès' };
+  }
+
+  @Post('profile/identity-documents')
+  @Roles(UserRole.CLIENT)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('JWT-auth')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiTags('Clients')
+  @ApiOperation({
+    summary: 'Upload document d’identité (recto, verso ou selfie)',
+    description: 'Upload un des 3 documents pour la vérification d’identité. **Ne fait pas partie des types de documents du profil.** kind = RECTO | VERSO | SELFIE. **Rôle : CLIENT**',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file', 'kind'],
+      properties: {
+        file: { type: 'string', format: 'binary', description: 'Fichier (JPG, PNG, PDF, max 10 MB)' },
+        kind: { type: 'string', enum: ['RECTO', 'VERSO', 'SELFIE'], description: 'Slot : recto CNI, verso CNI ou selfie' },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Document d’identité uploadé' })
+  @ApiResponse({ status: 400, description: 'Fichier invalide ou kind invalide' })
+  async uploadIdentityDocument(
+    @CurrentUser() user: any,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: UploadIdentityDocumentDto,
+  ) {
+    if (!file) throw new BadRequestException('Fichier requis');
+    return this.usersProfileService.uploadIdentityDocument(user.userId, file, dto.kind);
+  }
+
+  @Get('profile/identity-documents')
+  @Roles(UserRole.CLIENT)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiTags('Clients')
+  @ApiOperation({
+    summary: 'Liste des documents d’identité (recto, verso, selfie)',
+    description: 'Retourne les 3 slots éventuellement uploadés. **Rôle : CLIENT**',
+  })
+  @ApiResponse({ status: 200, description: 'Liste des documents d’identité' })
+  async getIdentityDocuments(@CurrentUser() user: any) {
+    return this.usersProfileService.getIdentityDocuments(user.userId);
+  }
+
+  @Get('profile/identity-documents/:documentId/file')
+  @Roles(UserRole.CLIENT)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiTags('Clients')
+  @ApiOperation({
+    summary: 'Fichier d’un document d’identité (aperçu)',
+    description: 'Retourne le fichier pour affichage. **Rôle : CLIENT**',
+  })
+  @ApiParam({ name: 'documentId', description: 'ID du document d’identité' })
+  @ApiResponse({ status: 200, description: 'Fichier binaire' })
+  @ApiResponse({ status: 404, description: 'Document non trouvé' })
+  async getIdentityDocumentFile(
+    @CurrentUser() user: any,
+    @Param('documentId') documentId: string,
+  ) {
+    const { buffer, mimeType } = await this.usersProfileService.getIdentityDocumentFile(user.userId, documentId);
+    return new StreamableFile(buffer, { type: mimeType });
   }
 
   @Patch('profile')
