@@ -13,8 +13,15 @@ import { EmailService } from '../common/services/email.service';
 import { UserIdentityDocument, IdentityDocumentKind } from '../users/entities/user-identity-document.entity';
 import { DocumentType } from '../documents/entities/document-type.entity';
 
-/** Infos minimales d’un document pour l’affichage (vérification d’identité) */
-export type IdentityDocumentInfo = { id: string; type: string; fileName: string; mimeType: string };
+/** Infos d’un document pour l’affichage (vérification d’identité) */
+export type IdentityDocumentInfo = {
+  id: string;
+  type: string;
+  fileName: string;
+  mimeType: string;
+  issueDate?: string;
+  expirationDate?: string;
+};
 
 export type VerificationListItem = Verification & { documentTypeTitle?: string };
 
@@ -171,6 +178,8 @@ export class VerificationsService {
           type: String(document.type),
           fileName: document.fileName,
           mimeType: document.mimeType,
+          issueDate: document.issueDate ? document.issueDate.toISOString().slice(0, 10) : undefined,
+          expirationDate: document.expirationDate ? document.expirationDate.toISOString().slice(0, 10) : undefined,
         };
       }
     } catch {
