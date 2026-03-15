@@ -14,6 +14,8 @@ import {
   UseInterceptors,
   BadRequestException,
   ForbiddenException,
+  InternalServerErrorException,
+  HttpException,
   StreamableFile,
 } from '@nestjs/common';
 import {
@@ -27,6 +29,7 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { UsersService } from './users.service';
 import { UsersProfileService } from './users-profile.service';
 import { RequestsService } from '../requests/requests.service';
@@ -853,7 +856,7 @@ Chaque type indique :
   @Roles(UserRole.CLIENT)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('JWT-auth')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
   @ApiConsumes('multipart/form-data')
   @ApiTags('Clients')
   @ApiOperation({
@@ -881,7 +884,17 @@ Chaque type indique :
     if (!dto?.kind || !['RECTO', 'VERSO', 'SELFIE'].includes(dto.kind)) {
       throw new BadRequestException('kind est requis : RECTO, VERSO ou SELFIE');
     }
-    return this.usersProfileService.uploadIdentityDocument(user.userId, file, dto.kind);
+    const userId = user?.userId ?? user?.sub ?? user?.id;
+    if (!userId) throw new BadRequestException('Utilisateur non identifié');
+    try {
+      return await this.usersProfileService.uploadIdentityDocument(userId, file, dto.kind);
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      throw new InternalServerErrorException({
+        message: 'Erreur lors de l\'upload du document d\'identité.',
+        error: err?.message ?? String(err),
+      });
+    }
   }
 
   @Get('profile/identity-documents')

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ServiceUnavailableException, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, HttpException, NotFoundException, BadRequestException, ServiceUnavailableException, InternalServerErrorException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
@@ -794,60 +794,70 @@ export class UsersProfileService {
         file: { buffer?: Buffer; originalname?: string; mimetype: string; size: number },
         kind: IdentityDocumentKind,
     ): Promise<UserIdentityDocument> {
-        const user = await this.userRepository.findOne({ where: { id: userId } });
-        if (!user) throw new NotFoundException('Utilisateur non trouvé');
-        if (!file || !file.buffer || !Buffer.isBuffer(file.buffer)) {
-            throw new BadRequestException('Fichier requis ou format invalide (envoi multipart avec champ "file")');
-        }
-        const originalname = file.originalname || 'document';
-        if (!this.allowedMimeTypes.includes(file.mimetype)) {
-            throw new BadRequestException('Type de fichier non autorisé. Formats acceptés : PDF, JPG, PNG');
-        }
-        if (file.size > this.maxFileSize) {
-            throw new BadRequestException('Fichier trop volumineux. Taille maximale : 10 MB');
-        }
-        const existing = await this.userIdentityDocumentRepository.findOne({
-            where: { userId, kind },
-        });
-        const fileExtension = path.extname(originalname) || '.bin';
-        const fileName = `identity-${userId}-${kind}-${Date.now()}${fileExtension}`;
-        const minioFileName = `identity-documents/${fileName}`;
-
         try {
-            await this.minioService.uploadFile(minioFileName, file.buffer, file.mimetype);
+            const user = await this.userRepository.findOne({ where: { id: userId } });
+            if (!user) throw new NotFoundException('Utilisateur non trouvé');
+            if (!file || !file.buffer || !Buffer.isBuffer(file.buffer)) {
+                throw new BadRequestException('Fichier requis ou format invalide (envoi multipart avec champ "file")');
+            }
+            const originalname = file.originalname || 'document';
+            if (!this.allowedMimeTypes.includes(file.mimetype)) {
+                throw new BadRequestException('Type de fichier non autorisé. Formats acceptés : PDF, JPG, PNG');
+            }
+            if (file.size > this.maxFileSize) {
+                throw new BadRequestException('Fichier trop volumineux. Taille maximale : 10 MB');
+            }
+            const existing = await this.userIdentityDocumentRepository.findOne({
+                where: { userId, kind },
+            });
+            const fileExtension = path.extname(originalname) || '.bin';
+            const fileName = `identity-${userId}-${kind}-${Date.now()}${fileExtension}`;
+            const minioFileName = `identity-documents/${fileName}`;
+
+            try {
+                await this.minioService.uploadFile(minioFileName, file.buffer, file.mimetype);
+            } catch (err) {
+                const errMsg = err?.message || String(err);
+                this.logger.error(`Upload identity document (MinIO): ${errMsg}`, err?.stack);
+                throw new ServiceUnavailableException({
+                    message: 'Stockage des fichiers indisponible.',
+                    error: errMsg,
+                    hint: 'Vérifiez MINIO_ENDPOINT, accès réseau depuis le serveur vers MinIO, et identifiants.',
+                });
+            }
+
+            if (existing) {
+                if (existing.filePath.startsWith('identity-documents/')) {
+                    try {
+                        await this.minioService.deleteFile(existing.filePath);
+                    } catch (e) {
+                        this.logger.warn(`Delete old identity doc ${existing.filePath}:`, e);
+                    }
+                }
+                existing.fileName = fileName;
+                existing.filePath = minioFileName;
+                existing.fileSize = `${(file.size / 1024).toFixed(2)} KB`;
+                existing.mimeType = file.mimetype;
+                return await this.userIdentityDocumentRepository.save(existing);
+            }
+            const doc = this.userIdentityDocumentRepository.create({
+                userId,
+                kind,
+                fileName,
+                filePath: minioFileName,
+                fileSize: `${(file.size / 1024).toFixed(2)} KB`,
+                mimeType: file.mimetype,
+            });
+            return await this.userIdentityDocumentRepository.save(doc);
         } catch (err) {
+            if (err instanceof HttpException) throw err;
             const errMsg = err?.message || String(err);
-            this.logger.error(`Upload identity document (MinIO): ${errMsg}`, err?.stack);
-            throw new ServiceUnavailableException({
-                message: 'Stockage des fichiers indisponible.',
+            this.logger.error(`Upload identity document: ${errMsg}`, err?.stack);
+            throw new InternalServerErrorException({
+                message: 'Erreur lors de l\'upload du document d\'identité.',
                 error: errMsg,
-                hint: 'Vérifiez MINIO_ENDPOINT, accès réseau depuis le serveur vers MinIO, et identifiants.',
             });
         }
-
-        if (existing) {
-            if (existing.filePath.startsWith('identity-documents/')) {
-                try {
-                    await this.minioService.deleteFile(existing.filePath);
-                } catch (e) {
-                    this.logger.warn(`Delete old identity doc ${existing.filePath}:`, e);
-                }
-            }
-            existing.fileName = fileName;
-            existing.filePath = minioFileName;
-            existing.fileSize = `${(file.size / 1024).toFixed(2)} KB`;
-            existing.mimeType = file.mimetype;
-            return await this.userIdentityDocumentRepository.save(existing);
-        }
-        const doc = this.userIdentityDocumentRepository.create({
-            userId,
-            kind,
-            fileName,
-            filePath: minioFileName,
-            fileSize: `${(file.size / 1024).toFixed(2)} KB`,
-            mimeType: file.mimetype,
-        });
-        return await this.userIdentityDocumentRepository.save(doc);
     }
 
     async getIdentityDocuments(userId: string): Promise<UserIdentityDocument[]> {
