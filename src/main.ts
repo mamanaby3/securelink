@@ -124,8 +124,10 @@ async function bootstrap() {
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('docs', app, document);
-    logger.log('  Swagger documentation disponible sur /docs');
+    SwaggerModule.setup('api/docs', app, document, {
+      jsonDocumentUrl: 'api/api-doc.json',
+    });
+    logger.log('  Swagger UI: /api/docs — OpenAPI JSON: /api/api-doc.json (import Postman/Insomnia)');
   } else {
     logger.warn('  Swagger désactivé (en prod : définir ENABLE_SWAGGER=true pour l’activer)');
   }
@@ -137,7 +139,7 @@ async function bootstrap() {
   logger.log(`  Environnement: ${isProduction ? 'PRODUCTION' : 'DÉVELOPPEMENT'}`);
   
   if (enableSwagger) {
-    logger.log(`  Swagger: http://localhost:${port}/docs`);
+    logger.log(`  Swagger: http://localhost:${port}/api/docs | OpenAPI JSON: http://localhost:${port}/api/api-doc.json`);
   }
 }
 

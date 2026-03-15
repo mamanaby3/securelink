@@ -1,0 +1,128 @@
+{
+  "info": {
+    "name": "Secure Link API",
+    "description": "Collection pour tester l'API Secure Link : authentification client et documents d'identité (recto CNI, verso CNI, selfie).\n\n**Utilisation :**\n1. Exécuter « Connexion client » avec email/mot de passe.\n2. Le token JWT est enregistré automatiquement.\n3. Enchaîner avec les requêtes « Upload recto/verso/selfie » (choisir un fichier pour chaque).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api" },
+    { "key": "token", "value": "" },
+    { "key": "documentId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Connexion client",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.accessToken) {",
+                  "  pm.collectionVariables.set('token', res.accessToken);",
+                  "  console.log('Token enregistré pour les requêtes suivantes.');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"votre-email@example.com\",\n  \"password\": \"VotreMotDePasse\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login/client",
+            "description": "Connexion en tant que client. Le token JWT est sauvegardé automatiquement dans la variable de collection `token`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Documents d'identité (client)",
+      "item": [
+        {
+          "name": "Upload recto CNI",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "Image recto CNI (JPG/PNG) ou PDF, max 10 Mo" },
+                { "key": "kind", "value": "RECTO", "type": "text" }
+              ]
+            },
+            "url": "{{baseUrl}}/users/profile/identity-documents",
+            "description": "Upload de la face avant de la pièce d'identité."
+          }
+        },
+        {
+          "name": "Upload verso CNI",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "Image verso CNI (JPG/PNG) ou PDF, max 10 Mo" },
+                { "key": "kind", "value": "VERSO", "type": "text" }
+              ]
+            },
+            "url": "{{baseUrl}}/users/profile/identity-documents",
+            "description": "Upload de la face arrière de la pièce d'identité."
+          }
+        },
+        {
+          "name": "Upload selfie",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "Selfie (JPG/PNG), max 10 Mo" },
+                { "key": "kind", "value": "SELFIE", "type": "text" }
+              ]
+            },
+            "url": "{{baseUrl}}/users/profile/identity-documents",
+            "description": "Upload du selfie pour vérification d'identité."
+          }
+        },
+        {
+          "name": "Liste des documents d'identité",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/users/profile/identity-documents",
+            "description": "Retourne la liste des 3 slots (recto, verso, selfie) avec leurs métadonnées."
+          }
+        },
+        {
+          "name": "Fichier d'un document d'identité",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": "{{baseUrl}}/users/profile/identity-documents/{{documentId}}/file",
+            "description": "Définir la variable de collection documentId (id retourné par la liste)."
+          }
+        }
+      ]
+    }
+  ]
+}

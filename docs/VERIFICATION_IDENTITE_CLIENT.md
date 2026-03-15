@@ -64,6 +64,12 @@ Authorization: Bearer <token_admin>
 
 ## 4. Test sans mobile (Postman / cURL)
 
+**En plus de Swagger :**
+
+- **Swagger UI** : `GET /api/docs`
+- **OpenAPI JSON** : une fois l’API démarrée, l’spec complète est disponible en `GET /api/api-doc.json` (à importer dans Postman ou Insomnia).
+- **Collection Postman** : le fichier `docs/Secure-Link-API.postman_collection.json` contient les requêtes prêtes à l’emploi (connexion client + upload recto/verso/selfie). Importer dans Postman, renseigner email/mot de passe dans « Connexion client », exécuter ; le token est enregistré automatiquement pour les requêtes suivantes.
+
 1. Se connecter en **client** : **POST /api/auth/login/client** → récupérer le token.
 2. Envoyer 3 fois **POST /api/users/profile/identity-documents** avec le même token :
    - `file` = le fichier
