@@ -9,6 +9,7 @@ import { Verification } from '../verifications/entities/verification.entity';
 import { Request } from '../requests/entities/request.entity';
 import { AuditLog } from '../audit-logs/entities/audit-log.entity';
 import { UserDocument } from '../users/entities/user-document.entity';
+import { UserIdentityDocument } from '../users/entities/user-identity-document.entity';
 import { SecuritySettings } from '../security/entities/security-settings.entity';
 import { Sector } from '../settings/entities/sector.entity';
 import { FormType } from '../settings/entities/form-type.entity';
@@ -34,6 +35,7 @@ import { Role } from '../settings/entities/role.entity';
           Request,
           AuditLog,
           UserDocument,
+          UserIdentityDocument,
           SecuritySettings,
           Sector,
           FormType,
