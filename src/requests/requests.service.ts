@@ -1050,10 +1050,7 @@ export class RequestsService {
       throw new BadRequestException('Le fichier PDF est trop volumineux (max 20 MB)');
     }
 
-    // On autorise l'upload pour toutes les demandes non brouillon
-    if (request.status === RequestStatus.BROUILLON) {
-      throw new BadRequestException('Vous devez d\'abord soumettre la demande avant d\'attacher le PDF rempli');
-    }
+    // On autorise l'upload pour brouillon (PDF rempli par le client avant soumission) et pour les demandes déjà soumises
 
     const fileName = `request-${request.id}-${Date.now()}.pdf`;
     const minioPath = `requests/${fileName}`;
