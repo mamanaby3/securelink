@@ -474,7 +474,7 @@ Par défaut, retourne les demandes du client (pour compatibilité)
     return this.requestsService.findByClient(id, status, formType);
   }
 
-  @Get(':id/documents')
+  @Get('admin/:id/documents')
   @Roles(UserRole.ADMIN, UserRole.CLIENT, UserRole.ORGANISATION)
   @UseGuards(JwtAuthGuard, RolesGuard, OrganisationRoleGuard)
   @ApiTags('Admin', 'Clients', 'Organisations')
