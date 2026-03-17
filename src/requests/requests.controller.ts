@@ -36,7 +36,7 @@ import { VerifyRequestOtpDto } from './dto/verify-request-otp.dto';
 import { UpdateRequestEmailDto } from './dto/update-request-email.dto';
 import { RequestStatus } from './entities/request.entity';
 import { RequestStatisticsDto } from './dto/request-statistics.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { OrganisationRoles } from '../auth/decorators/organisation-roles.decorator';
@@ -45,7 +45,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole, OrganisationRole } from '../auth/dto/register.dto';
 
 @Controller('requests')
-@UseGuards(JwtAuthGuard, RolesGuard, OrganisationRoleGuard)
+@UseGuards(JwtOrUploadTokenGuard, RolesGuard, OrganisationRoleGuard)
 @ApiBearerAuth('JWT-auth')
 export class RequestsController {
   constructor(private readonly requestsService: RequestsService) { }
@@ -605,6 +605,24 @@ Cette méthode crée directement une demande soumise (ancien comportement).
     @Body() rejectDto: RejectRequestDto,
   ) {
     return this.requestsService.reject(id, rejectDto.reason, user.userId);
+  }
+
+  @Get(':id/upload-token')
+  @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('Clients')
+  @ApiOperation({
+    summary: 'Obtenir un token court terme pour l’upload du PDF depuis l’éditeur (cross-origin)',
+    description: `Retourne un JWT court terme à passer en query à l’éditeur PDF (paramètre \`uploadToken\`). L’éditeur l’envoie en header \`X-Upload-Token\` sur POST/PUT \`upload-filled-pdf\` pour authentifier la requête sans cookie cross-origin. **Rôles :** CLIENT (pour ses demandes) ou ADMIN.`,
+  })
+  @ApiParam({ name: 'id', description: 'ID de la demande (brouillon)' })
+  @ApiResponse({ status: 200, description: 'Token d’upload (à passer à l’éditeur PDF)' })
+  async getUploadToken(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    const uploadToken = await this.requestsService.getUploadToken(id, user.userId, user.role);
+    return { uploadToken };
   }
 
   @Post(':id/upload-filled-pdf')

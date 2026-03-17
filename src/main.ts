@@ -60,7 +60,7 @@ async function bootstrap() {
   app.enableCors({
     origin: allowedOrigins.length > 0 ? allowedOrigins : false,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Forwarded-For', 'X-Real-IP', 'CF-Connecting-IP'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Upload-Token', 'X-Forwarded-For', 'X-Real-IP', 'CF-Connecting-IP'],
     credentials: true,
     maxAge: 86400, // Cache preflight requests for 24 hours
   });

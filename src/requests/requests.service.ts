@@ -14,12 +14,15 @@ import { DocumentType as DocumentTypeEntity } from '../documents/entities/docume
 import { EmailService } from '../common/services/email.service';
 import { SmsService } from '../common/services/sms.service';
 import { MinioService } from '../storage/minio.service';
+import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '../auth/dto/register.dto';
 
 @Injectable()
 export class RequestsService {
   private readonly logger = new Logger(RequestsService.name);
   private readonly OTP_EXPIRATION = 10 * 60 * 1000; // 10 minutes
   private readonly OTP_LENGTH = 6;
+  private readonly UPLOAD_TOKEN_EXPIRATION = '15m';
 
   constructor(
     @InjectRepository(User)
@@ -35,6 +38,7 @@ export class RequestsService {
     private emailService: EmailService,
     private smsService: SmsService,
     private minioService: MinioService,
+    private jwtService: JwtService,
   ) { }
 
   /**
@@ -681,6 +685,21 @@ export class RequestsService {
     }
 
     return request;
+  }
+
+  /**
+   * Génère un JWT court terme pour l'upload du PDF rempli depuis l'app PDF (cross-origin).
+   * Le token est validé par JwtOrUploadTokenGuard sur POST/PUT upload-filled-pdf.
+   */
+  async getUploadToken(requestId: string, userId: string, userRole: string): Promise<string> {
+    const request = await this.findOne(requestId);
+    if (userRole !== UserRole.ADMIN && request.clientId !== userId) {
+      throw new ForbiddenException('Vous ne pouvez obtenir un token d\'upload que pour vos propres demandes');
+    }
+    return this.jwtService.sign(
+      { requestId, type: 'upload' },
+      { expiresIn: this.UPLOAD_TOKEN_EXPIRATION },
+    );
   }
 
   async findByOrganisation(organisationId: string, status?: string, formType?: string): Promise<Request[]> {
