@@ -649,6 +649,7 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
           format: 'binary',
           description: 'PDF rempli de la demande (contrat signé, formulaire complété, etc.)',
         },
+        label: { type: 'string', description: 'Nom du document (ex. Contrat, Renseignements) pour multi-PDF' },
       },
       required: ['file'],
     },
@@ -660,11 +661,11 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
   async uploadFilledPdf(
     @Param('id') id: string,
     @UploadedFile() file: any,
+    @Body('label') label: string | undefined,
     @CurrentUser() user: any,
   ) {
     const request = await this.requestsService.findOne(id);
 
-    // Un client ne peut uploader que pour ses propres demandes
     if (user.role === UserRole.CLIENT && request.clientId !== user.userId) {
       throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
     }
@@ -674,12 +675,13 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
-    });
+    }, label);
 
     return {
       id: updatedRequest.id,
       requestNumber: updatedRequest.requestNumber,
       submittedForm: updatedRequest.submittedForm,
+      submittedForms: updatedRequest.submittedForms,
       message: 'PDF rempli attaché avec succès à la demande.',
     };
   }
@@ -700,6 +702,7 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       type: 'object',
       properties: {
         file: { type: 'string', format: 'binary', description: 'PDF rempli (version modifiée)' },
+        label: { type: 'string', description: 'Nom du document pour multi-PDF' },
       },
       required: ['file'],
     },
@@ -708,6 +711,7 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
   async updateFilledPdf(
     @Param('id') id: string,
     @UploadedFile() file: any,
+    @Body('label') label: string | undefined,
     @CurrentUser() user: any,
   ) {
     const request = await this.requestsService.findOne(id);
@@ -719,11 +723,12 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
-    });
+    }, label);
     return {
       id: updatedRequest.id,
       requestNumber: updatedRequest.requestNumber,
       submittedForm: updatedRequest.submittedForm,
+      submittedForms: updatedRequest.submittedForms,
       message: 'PDF rempli mis à jour avec succès.',
     };
   }

@@ -1048,11 +1048,14 @@ export class RequestsService {
   }
 
   /**
-   * Upload du vrai PDF rempli de la demande (provenant d'une app externe)
+   * Upload du vrai PDF rempli de la demande (provenant d'une app externe).
+   * Si label est fourni : ajout/mise à jour dans submittedForms (multi-PDF avec nom).
+   * Sinon : comportement historique (un seul submittedForm).
    */
   async uploadFilledPdf(
     requestId: string,
     file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+    label?: string,
   ): Promise<Request> {
     const request = await this.findOne(requestId);
 
@@ -1069,21 +1072,47 @@ export class RequestsService {
       throw new BadRequestException('Le fichier PDF est trop volumineux (max 20 MB)');
     }
 
-    // On autorise l'upload pour brouillon (PDF rempli par le client avant soumission) et pour les demandes déjà soumises
-
-    const fileName = `request-${request.id}-${Date.now()}.pdf`;
+    const version =
+      request.formSchemaSnapshot?.version ||
+      request.form?.version ||
+      '1.0';
+    const fileName = `request-${request.id}-${Date.now()}-${(label || 'doc').replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
     const minioPath = `requests/${fileName}`;
 
     await this.minioService.uploadFile(minioPath, file.buffer, 'application/pdf');
     const presignedUrl = await this.minioService.getPresignedUrl(minioPath);
 
-    request.submittedForm = {
-      pdfUrl: presignedUrl,
-      version:
-        request.formSchemaSnapshot?.version ||
-        request.form?.version ||
-        '1.0',
-    };
+    if (label != null && String(label).trim() !== '') {
+      // Multi-PDF : ajouter ou mettre à jour l'entrée dans submittedForms
+      if (!request.submittedForms) {
+        request.submittedForms = [];
+      }
+      const existingIndex = request.submittedForms.findIndex((e) => e.label === label);
+      const entry = {
+        label: String(label).trim(),
+        fileName: file.originalname || fileName,
+        pdfUrl: presignedUrl,
+        version,
+      };
+      if (existingIndex >= 0) {
+        request.submittedForms[existingIndex] = entry;
+      } else {
+        request.submittedForms.push(entry);
+      }
+      // Premier PDF de la liste = submittedForm pour compatibilité
+      if (request.submittedForms.length > 0) {
+        request.submittedForm = {
+          pdfUrl: request.submittedForms[0].pdfUrl,
+          version: request.submittedForms[0].version || version,
+        };
+      }
+    } else {
+      // Comportement historique : un seul PDF
+      request.submittedForm = {
+        pdfUrl: presignedUrl,
+        version,
+      };
+    }
 
     request.updatedAt = new Date();
     return this.requestRepository.save(request);

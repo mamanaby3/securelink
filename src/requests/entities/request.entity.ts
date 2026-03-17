@@ -113,6 +113,15 @@ export class Request {
     version: string;
   };
 
+  /** Liste des PDFs du formulaire remplis (un par document : Contrat, Renseignements, etc.) avec leur nom. */
+  @Column({ type: 'jsonb', nullable: true })
+  submittedForms?: Array<{
+    label: string;
+    fileName?: string;
+    pdfUrl?: string;
+    version?: string;
+  }>;
+
   @Column({ type: 'jsonb', default: '[]' })
   tracking: Array<{
     status: RequestTrackingStatus;
