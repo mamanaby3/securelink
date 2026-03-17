@@ -555,7 +555,9 @@ export class RequestsService {
   }
 
   async findAll(status?: string, formType?: string): Promise<Request[]> {
-    const queryBuilder = this.requestRepository.createQueryBuilder('request');
+    const queryBuilder = this.requestRepository
+      .createQueryBuilder('request')
+      .leftJoinAndSelect('request.organisation', 'organisation');
 
     // Exclure les brouillons et les demandes avec OTP non vérifié pour admin/organisation
     queryBuilder.andWhere(
@@ -578,7 +580,9 @@ export class RequestsService {
   }
 
   async findByClient(clientId: string, status?: string, formType?: string, includeDrafts: boolean = false): Promise<Request[]> {
-    const queryBuilder = this.requestRepository.createQueryBuilder('request')
+    const queryBuilder = this.requestRepository
+      .createQueryBuilder('request')
+      .leftJoinAndSelect('request.organisation', 'organisation')
       .where('request.clientId = :clientId', { clientId });
 
     // Par défaut, exclure les brouillons et les demandes avec OTP non vérifié sauf si explicitement demandé
@@ -703,7 +707,9 @@ export class RequestsService {
   }
 
   async findByOrganisation(organisationId: string, status?: string, formType?: string): Promise<Request[]> {
-    const queryBuilder = this.requestRepository.createQueryBuilder('request')
+    const queryBuilder = this.requestRepository
+      .createQueryBuilder('request')
+      .leftJoinAndSelect('request.organisation', 'organisation')
       .where('request.organisationId = :organisationId', { organisationId });
 
     // Exclure les brouillons et les demandes avec OTP non vérifié pour l'organisation
