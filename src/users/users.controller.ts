@@ -933,7 +933,9 @@ Chaque type indique :
 
   @Patch('profile')
   @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
-  @UseGuards(JwtAuthGuard, RolesGuard, OrganisationRoleGuard)
+  // IMPORTANT: le client doit pouvoir modifier son propre profil.
+  // OrganisationRoleGuard ne doit pas s'appliquer ici (sinon blocage des CLIENT).
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @UseInterceptors(FileInterceptor('profilePicture'))
   @ApiConsumes('multipart/form-data')
   @ApiBearerAuth('JWT-auth')
