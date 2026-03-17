@@ -36,7 +36,7 @@ import { VerifyRequestOtpDto } from './dto/verify-request-otp.dto';
 import { UpdateRequestEmailDto } from './dto/update-request-email.dto';
 import { RequestStatus } from './entities/request.entity';
 import { RequestStatisticsDto } from './dto/request-statistics.dto';
-import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { OrganisationRoles } from '../auth/decorators/organisation-roles.decorator';
@@ -45,7 +45,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole, OrganisationRole } from '../auth/dto/register.dto';
 
 @Controller('requests')
-@UseGuards(JwtOrUploadTokenGuard, RolesGuard, OrganisationRoleGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, OrganisationRoleGuard)
 @ApiBearerAuth('JWT-auth')
 export class RequestsController {
   constructor(private readonly requestsService: RequestsService) { }
@@ -229,17 +229,32 @@ Cette méthode crée directement une demande soumise (ancien comportement).
   @ApiQuery({ name: 'organisationId', required: false, description: 'Filtrer par organisation (ADMIN uniquement)' })
   @ApiQuery({ name: 'status', required: false, description: 'Filtrer par statut (EN_ATTENTE, EN_COURS, VALIDEE, REJETEE)' })
   @ApiQuery({ name: 'formType', required: false, description: 'Filtrer par type de formulaire' })
-  @ApiResponse({ status: 200, description: 'Liste des demandes' })
+  @ApiQuery({ name: 'page', required: false, description: 'Numéro de page (1-based), pour pagination client' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Nombre par page (défaut 10)' })
+  @ApiQuery({ name: 'search', required: false, description: 'Recherche (numéro, formulaire, organisation)' })
+  @ApiResponse({ status: 200, description: 'Liste des demandes (ou { items, total, page, limit } pour client avec pagination)' })
   @ApiResponse({ status: 403, description: 'Accès refusé' })
   async findAll(
     @Query('organisationId') organisationId?: string,
     @Query('status') status?: string,
     @Query('formType') formType?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
     @CurrentUser() user?: any,
   ) {
-    // Pour les clients, filtrer uniquement leurs demandes (exclure les brouillons)
+    // Pour les clients : liste paginée avec recherche
     if (user?.role === UserRole.CLIENT) {
-      return await this.requestsService.findByClient(user.userId, status, formType, false);
+      const pageNum = page ? parseInt(page, 10) : 1;
+      const limitNum = limit ? parseInt(limit, 10) : 10;
+      const { items, total } = await this.requestsService.findByClientPaginated(user.userId, {
+        page: pageNum,
+        limit: limitNum,
+        search: search || undefined,
+        status: status || undefined,
+        formType: formType || undefined,
+      });
+      return { items, total, page: pageNum, limit: limitNum };
     }
 
     // Pour les organisations, filtrer par leur organisation

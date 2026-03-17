@@ -608,6 +608,52 @@ export class RequestsService {
   }
 
   /**
+   * Liste paginée des demandes d'un client avec recherche (numéro, formulaire, organisation).
+   */
+  async findByClientPaginated(
+    clientId: string,
+    options: { page?: number; limit?: number; search?: string; status?: string; formType?: string },
+  ): Promise<{ items: Request[]; total: number }> {
+    const page = Math.max(1, options.page ?? 1);
+    const limit = Math.min(100, Math.max(1, options.limit ?? 10));
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.requestRepository
+      .createQueryBuilder('request')
+      .leftJoinAndSelect('request.organisation', 'organisation')
+      .where('request.clientId = :clientId', { clientId })
+      .andWhere(
+        '(request.status != :draftStatus AND NOT (request.status = :enAttenteStatus AND (request.otpVerified = false OR request.otpVerified IS NULL)))',
+        {
+          draftStatus: RequestStatus.BROUILLON,
+          enAttenteStatus: RequestStatus.EN_ATTENTE,
+        },
+      );
+
+    if (options.status) {
+      queryBuilder.andWhere('request.status = :status', { status: options.status });
+    }
+    if (options.formType) {
+      queryBuilder.andWhere('request.formType = :formType', { formType: options.formType });
+    }
+    if (options.search?.trim()) {
+      const term = `%${options.search.trim()}%`;
+      queryBuilder.andWhere(
+        '(request.requestNumber ILIKE :term OR request.formName ILIKE :term OR request.organisationName ILIKE :term OR organisation.name ILIKE :term)',
+        { term },
+      );
+    }
+
+    const [items, total] = await queryBuilder
+      .orderBy('request.updatedAt', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
+
+    return { items, total };
+  }
+
+  /**
    * Récupère les demandes récentes d'un client avec l'organisation chargée (pour institution / secteur).
    * Filtres optionnels : status, category, institution, type, search (recherche globale).
    */
