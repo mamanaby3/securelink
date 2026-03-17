@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Param,
   Delete,
@@ -662,6 +663,50 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       requestNumber: updatedRequest.requestNumber,
       submittedForm: updatedRequest.submittedForm,
       message: 'PDF rempli attaché avec succès à la demande.',
+    };
+  }
+
+  @Put(':id/upload-filled-pdf')
+  @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.OK)
+  @ApiTags('Clients')
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Mettre à jour le PDF rempli de la demande',
+    description: `Même logique que POST : remplace le PDF rempli déjà attaché (retour dans l'éditeur puis nouvelle sauvegarde). **Rôles :** CLIENT (pour ses propres demandes) ou ADMIN.`,
+  })
+  @ApiParam({ name: 'id', description: 'ID de la demande' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary', description: 'PDF rempli (version modifiée)' },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'PDF rempli mis à jour avec succès' })
+  async updateFilledPdf(
+    @Param('id') id: string,
+    @UploadedFile() file: any,
+    @CurrentUser() user: any,
+  ) {
+    const request = await this.requestsService.findOne(id);
+    if (user.role === UserRole.CLIENT && request.clientId !== user.userId) {
+      throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
+    }
+    const updatedRequest = await this.requestsService.uploadFilledPdf(id, {
+      buffer: file.buffer,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+    });
+    return {
+      id: updatedRequest.id,
+      requestNumber: updatedRequest.requestNumber,
+      submittedForm: updatedRequest.submittedForm,
+      message: 'PDF rempli mis à jour avec succès.',
     };
   }
 
