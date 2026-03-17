@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { QueryFailedError } from 'typeorm';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { SaveDraftRequestDto } from './dto/save-draft-request.dto';
@@ -735,6 +735,28 @@ export class RequestsService {
     }
 
     return request;
+  }
+
+  /**
+   * Détail d'une demande avec documents justificatifs requis (types du formulaire).
+   * Utilisé pour la page détail client : requiredDocuments = liste des pièces à fournir (Carte d'identité, etc.).
+   */
+  async findOneWithRequiredDocuments(id: string): Promise<Request & { requiredDocuments?: Array<{ id?: string; label: string; size?: string; fileUrl?: string }> }> {
+    const request = await this.findOne(id);
+    const requiredDocuments: Array<{ id?: string; label: string; size?: string; fileUrl?: string }> = [];
+
+    const form = request.form;
+    const requiredDocIds = form?.requiredDocuments && Array.isArray(form.requiredDocuments) ? form.requiredDocuments : [];
+    if (requiredDocIds.length > 0) {
+      const docTypes = await this.documentTypeRepository.find({
+        where: { id: In(requiredDocIds) },
+      });
+      for (const dt of docTypes) {
+        requiredDocuments.push({ id: dt.id, label: dt.title || 'Document' });
+      }
+    }
+
+    return { ...request, requiredDocuments };
   }
 
   /**

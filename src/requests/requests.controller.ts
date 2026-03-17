@@ -307,7 +307,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
   @ApiResponse({ status: 403, description: 'Accès refusé - Vous ne pouvez pas voir cette demande' })
   @ApiResponse({ status: 404, description: 'Demande non trouvée' })
   async findOne(@Param('id') id: string, @CurrentUser() user?: any) {
-    const request = await this.requestsService.findOne(id);
+    const request = await this.requestsService.findOneWithRequiredDocuments(id);
 
     // Vérifier les permissions
     if (user?.role === UserRole.CLIENT && request.clientId !== user.userId) {
