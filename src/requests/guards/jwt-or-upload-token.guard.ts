@@ -4,12 +4,14 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from '../../auth/auth.service';
 import { RequestsService } from '../requests.service';
 import { UserRole } from '../../auth/dto/register.dto';
 
 const UPLOAD_TOKEN_TYPE = 'upload';
+const DEFAULT_JWT_SECRET = 'your-secret-key-change-in-production';
 
 @Injectable()
 export class JwtOrUploadTokenGuard implements CanActivate {
@@ -17,6 +19,7 @@ export class JwtOrUploadTokenGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly authService: AuthService,
     private readonly requestsService: RequestsService,
+    private readonly configService: ConfigService,
   ) {}
 
   private isUploadFilledPdfRequest(context: ExecutionContext): boolean {
@@ -50,7 +53,7 @@ export class JwtOrUploadTokenGuard implements CanActivate {
     if (bearerToken) {
       try {
         const secret =
-          process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+          this.configService.get<string>('JWT_SECRET') || DEFAULT_JWT_SECRET;
         const payload = this.jwtService.verify(bearerToken, { secret });
         const user = await this.authService.validateUserById(payload.sub);
         if (user && user.isActive) {
@@ -76,7 +79,7 @@ export class JwtOrUploadTokenGuard implements CanActivate {
       if (uploadToken && requestId) {
         try {
           const secret =
-            process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+            this.configService.get<string>('JWT_SECRET') || DEFAULT_JWT_SECRET;
           const payload = this.jwtService.verify(uploadToken, { secret });
           if (
             payload?.type === UPLOAD_TOKEN_TYPE &&

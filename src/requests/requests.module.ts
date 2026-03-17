@@ -14,6 +14,7 @@ import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
 
 @Module({
   imports: [
+    ConfigModule,
     TypeOrmModule.forFeature([Request, User, Form, UserDocument, DocumentType]),
     AuthModule,
     JwtModule.registerAsync({
