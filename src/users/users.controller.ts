@@ -931,6 +931,43 @@ Chaque type indique :
     return new StreamableFile(buffer, { type: mimeType });
   }
 
+  @Patch('me/profile')
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseInterceptors(FileInterceptor('profilePicture'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBearerAuth('JWT-auth')
+  @ApiTags('Clients', 'Admin', 'Organisations')
+  @ApiOperation({
+    summary: 'Mettre à jour mon profil (route non ambiguë)',
+    description: 'Même logique que PATCH /users/profile, mais évite le conflit avec PATCH /users/:id. **Rôles : CLIENT, ADMIN, ORGANISATION**',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        firstName: { type: 'string' },
+        lastName: { type: 'string' },
+        phone: { type: 'string' },
+        email: { type: 'string' },
+        address: { type: 'string' },
+        maritalStatus: { type: 'string' },
+        profilePicture: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  async updateMyProfile(
+    @CurrentUser() user: any,
+    @Body() updateProfileDto: UpdateProfileDto,
+    @UploadedFile() profilePicture?: any,
+  ) {
+    if (profilePicture) {
+      const profilePicturePath = await this.usersService.saveProfilePicture(user.userId, profilePicture);
+      (updateProfileDto as any).profilePicture = profilePicturePath;
+    }
+    return this.usersService.updateProfile(user.userId, updateProfileDto);
+  }
+
   @Patch('profile')
   @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
   // IMPORTANT: le client doit pouvoir modifier son propre profil.
