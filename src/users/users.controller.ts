@@ -18,6 +18,8 @@ import {
   HttpException,
   StreamableFile,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   ApiTags,
   ApiOperation,
@@ -928,6 +930,37 @@ Chaque type indique :
     @Param('documentId') documentId: string,
   ) {
     const { buffer, mimeType } = await this.usersProfileService.getIdentityDocumentFile(user.userId, documentId);
+    return new StreamableFile(buffer, { type: mimeType });
+  }
+
+  @Get('me/profile-picture')
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiTags('Clients', 'Admin', 'Organisations')
+  @ApiOperation({
+    summary: 'Récupérer ma photo de profil (blob)',
+    description: 'Retourne la photo de profil de l’utilisateur connecté (si elle existe).',
+  })
+  @ApiResponse({ status: 200, description: 'Fichier image' })
+  @ApiResponse({ status: 404, description: 'Aucune photo de profil' })
+  async getMyProfilePicture(@CurrentUser() user: any) {
+    const u = await this.usersService.findOne(user.userId);
+    const rel = (u as any)?.profilePicture as string | undefined;
+    if (!rel || !rel.startsWith('profiles/')) {
+      throw new HttpException('Aucune photo de profil', 404);
+    }
+    const fileName = path.basename(rel);
+    const fullPath = path.join(process.cwd(), 'uploads', 'profiles', fileName);
+    if (!fs.existsSync(fullPath)) {
+      throw new HttpException('Fichier introuvable', 404);
+    }
+    const buffer = fs.readFileSync(fullPath);
+    const ext = path.extname(fileName).toLowerCase();
+    const mimeType =
+      ext === '.png' ? 'image/png' :
+      ext === '.webp' ? 'image/webp' :
+      'image/jpeg';
     return new StreamableFile(buffer, { type: mimeType });
   }
 
