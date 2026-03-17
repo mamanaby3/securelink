@@ -36,7 +36,7 @@ import { VerifyRequestOtpDto } from './dto/verify-request-otp.dto';
 import { UpdateRequestEmailDto } from './dto/update-request-email.dto';
 import { RequestStatus } from './entities/request.entity';
 import { RequestStatisticsDto } from './dto/request-statistics.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { OrganisationRoles } from '../auth/decorators/organisation-roles.decorator';
@@ -45,7 +45,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole, OrganisationRole } from '../auth/dto/register.dto';
 
 @Controller('requests')
-@UseGuards(JwtAuthGuard, RolesGuard, OrganisationRoleGuard)
+@UseGuards(JwtOrUploadTokenGuard, RolesGuard, OrganisationRoleGuard)
 @ApiBearerAuth('JWT-auth')
 export class RequestsController {
   constructor(private readonly requestsService: RequestsService) { }
@@ -245,8 +245,8 @@ Cette méthode crée directement une demande soumise (ancien comportement).
   ) {
     // Pour les clients : liste paginée avec recherche
     if (user?.role === UserRole.CLIENT) {
-      const pageNum = page ? parseInt(page, 10) : 1;
-      const limitNum = limit ? parseInt(limit, 10) : 10;
+      const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+      const limitNum = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 10));
       const { items, total } = await this.requestsService.findByClientPaginated(user.userId, {
         page: pageNum,
         limit: limitNum,
