@@ -927,6 +927,8 @@ export class AuthService {
       lastName: user.lastName,
       email: user.email,
       phone: user.phone,
+      address: user.address,
+      maritalStatus: user.maritalStatus,
       role: user.role,
       type: user.type,
       organisationId: user.organisationId,
