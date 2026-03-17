@@ -52,6 +52,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../auth/entities/user.entity';
 import { RequestStatus } from '../requests/entities/request.entity';
 import { DocumentStatus } from './entities/user-document.entity';
+import { MinioService } from '../storage/minio.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -61,6 +62,7 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly usersProfileService: UsersProfileService,
     private readonly requestsService: RequestsService,
+    private readonly minioService: MinioService,
   ) { }
 
   @Post()
@@ -952,10 +954,20 @@ Chaque type indique :
     }
     const fileName = path.basename(rel);
     const fullPath = path.join(process.cwd(), 'uploads', 'profiles', fileName);
-    if (!fs.existsSync(fullPath)) {
+    let buffer: Buffer | null = null;
+    if (fs.existsSync(fullPath)) {
+      buffer = fs.readFileSync(fullPath);
+    } else {
+      // Fallback MinIO (si stockage disque non persistant)
+      try {
+        buffer = await this.minioService.getFile(rel);
+      } catch (_) {
+        buffer = null;
+      }
+    }
+    if (!buffer) {
       throw new HttpException('Fichier introuvable', 404);
     }
-    const buffer = fs.readFileSync(fullPath);
     const ext = path.extname(fileName).toLowerCase();
     const mimeType =
       ext === '.png' ? 'image/png' :

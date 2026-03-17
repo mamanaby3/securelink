@@ -10,6 +10,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from '../auth/entities/user.entity';
 import { Organisation } from '../organisations/entities/organisation.entity';
 import { UserRole, UserType, OrganisationRole } from '../auth/dto/register.dto';
+import { MinioService } from '../storage/minio.service';
 
 @Injectable()
 export class UsersService {
@@ -23,6 +24,7 @@ export class UsersService {
     private userRepository: Repository<User>,
     @InjectRepository(Organisation)
     private organisationRepository: Repository<Organisation>,
+    private minioService: MinioService,
   ) {
     // Créer le dossier uploads/profiles s'il n'existe pas
     if (!fs.existsSync(this.profilesDir)) {
@@ -59,6 +61,12 @@ export class UsersService {
     try {
       fs.writeFileSync(filePath, profilePicture.buffer);
       this.logger.log(`Photo de profil sauvegardée : ${filePath}`);
+      // Upload aussi sur MinIO (pour les environnements sans stockage disque persistant)
+      try {
+        await this.minioService.uploadFile(`profiles/${fileName}`, profilePicture.buffer, profilePicture.mimetype);
+      } catch (err) {
+        this.logger.warn(`Upload MinIO photo de profil échoué: ${err?.message || err}`);
+      }
       
       // Retourner le chemin relatif pour stockage en base de données
       return `profiles/${fileName}`;
