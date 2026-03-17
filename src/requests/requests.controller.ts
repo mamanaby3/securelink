@@ -229,6 +229,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
   @ApiQuery({ name: 'organisationId', required: false, description: 'Filtrer par organisation (ADMIN uniquement)' })
   @ApiQuery({ name: 'status', required: false, description: 'Filtrer par statut (EN_ATTENTE, EN_COURS, VALIDEE, REJETEE)' })
   @ApiQuery({ name: 'formType', required: false, description: 'Filtrer par type de formulaire' })
+  @ApiQuery({ name: 'sector', required: false, description: 'Filtrer par secteur de l’organisation (CLIENT)' })
   @ApiQuery({ name: 'page', required: false, description: 'Numéro de page (1-based), pour pagination client' })
   @ApiQuery({ name: 'limit', required: false, description: 'Nombre par page (défaut 10)' })
   @ApiQuery({ name: 'search', required: false, description: 'Recherche (numéro, formulaire, organisation)' })
@@ -238,6 +239,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
     @Query('organisationId') organisationId?: string,
     @Query('status') status?: string,
     @Query('formType') formType?: string,
+    @Query('sector') sector?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
@@ -253,6 +255,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
         search: search || undefined,
         status: status || undefined,
         formType: formType || undefined,
+        sector: sector || undefined,
       });
       return { items, total, page: pageNum, limit: limitNum };
     }
@@ -677,6 +680,7 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
     @Param('id') id: string,
     @UploadedFile() file: any,
     @Body('label') label: string | undefined,
+    @Body('editorState') editorStateRaw: string | undefined,
     @CurrentUser() user: any,
   ) {
     const request = await this.requestsService.findOne(id);
@@ -685,12 +689,21 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
     }
 
+    let editorState: unknown = undefined;
+    if (editorStateRaw != null && String(editorStateRaw).trim() !== '') {
+      try {
+        editorState = JSON.parse(String(editorStateRaw));
+      } catch (_) {
+        editorState = undefined;
+      }
+    }
+
     const updatedRequest = await this.requestsService.uploadFilledPdf(id, {
       buffer: file.buffer,
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
-    }, label);
+    }, label, editorState);
 
     return {
       id: updatedRequest.id,
@@ -727,18 +740,28 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
     @Param('id') id: string,
     @UploadedFile() file: any,
     @Body('label') label: string | undefined,
+    @Body('editorState') editorStateRaw: string | undefined,
     @CurrentUser() user: any,
   ) {
     const request = await this.requestsService.findOne(id);
     if (user.role === UserRole.CLIENT && request.clientId !== user.userId) {
       throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
     }
+    let editorState: unknown = undefined;
+    if (editorStateRaw != null && String(editorStateRaw).trim() !== '') {
+      try {
+        editorState = JSON.parse(String(editorStateRaw));
+      } catch (_) {
+        editorState = undefined;
+      }
+    }
+
     const updatedRequest = await this.requestsService.uploadFilledPdf(id, {
       buffer: file.buffer,
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size,
-    }, label);
+    }, label, editorState);
     return {
       id: updatedRequest.id,
       requestNumber: updatedRequest.requestNumber,

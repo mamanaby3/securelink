@@ -612,7 +612,7 @@ export class RequestsService {
    */
   async findByClientPaginated(
     clientId: string,
-    options: { page?: number; limit?: number; search?: string; status?: string; formType?: string },
+    options: { page?: number; limit?: number; search?: string; status?: string; formType?: string; sector?: string },
   ): Promise<{ items: Request[]; total: number }> {
     const page = Math.max(1, Number(options.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(options.limit) || 10));
@@ -635,6 +635,9 @@ export class RequestsService {
     }
     if (options.formType) {
       queryBuilder.andWhere('request.formType = :formType', { formType: options.formType });
+    }
+    if (options.sector?.trim()) {
+      queryBuilder.andWhere('organisation.sector = :sector', { sector: options.sector.trim().toUpperCase() });
     }
     if (options.search?.trim()) {
       const term = `%${options.search.trim()}%`;
@@ -1130,6 +1133,7 @@ export class RequestsService {
     requestId: string,
     file: { buffer: Buffer; originalname: string; mimetype: string; size: number },
     label?: string,
+    editorState?: unknown,
   ): Promise<Request> {
     const request = await this.findOne(requestId);
 
@@ -1167,6 +1171,7 @@ export class RequestsService {
         fileName: file.originalname || fileName,
         pdfUrl: presignedUrl,
         version,
+        editorState: editorState ?? undefined,
       };
       if (existingIndex >= 0) {
         request.submittedForms[existingIndex] = entry;
