@@ -227,6 +227,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
     description: '**Pour CLIENT:** Retourne uniquement les demandes du client connecté.\n**Pour ORGANISATION:** Retourne les demandes de leur organisation.\n**Pour ADMIN:** Retourne toutes les demandes.\n**Rôles autorisés:** ADMIN, ORGANISATION (avec AGENT/SUPERVISEUR/ADMINISTRATION), CLIENT'
   })
   @ApiQuery({ name: 'organisationId', required: false, description: 'Filtrer par organisation (ADMIN uniquement)' })
+  @ApiQuery({ name: 'clientId', required: false, description: 'Filtrer par client (ADMIN uniquement)' })
   @ApiQuery({ name: 'status', required: false, description: 'Filtrer par statut (EN_ATTENTE, EN_COURS, VALIDEE, REJETEE)' })
   @ApiQuery({ name: 'formType', required: false, description: 'Filtrer par type de formulaire' })
   @ApiQuery({ name: 'sector', required: false, description: 'Filtrer par secteur de l’organisation (CLIENT)' })
@@ -237,6 +238,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
   @ApiResponse({ status: 403, description: 'Accès refusé' })
   async findAll(
     @Query('organisationId') organisationId?: string,
+    @Query('clientId') clientId?: string,
     @Query('status') status?: string,
     @Query('formType') formType?: string,
     @Query('sector') sector?: string,
@@ -263,6 +265,11 @@ Cette méthode crée directement une demande soumise (ancien comportement).
     // Pour les organisations, filtrer par leur organisation
     if (user?.role === UserRole.ORGANISATION && user.organisationId) {
       return await this.requestsService.findByOrganisation(user.organisationId, status, formType);
+    }
+
+    // Pour ADMIN : filtrer par client si demandé
+    if (clientId && user?.role === UserRole.ADMIN) {
+      return await this.requestsService.findByClient(clientId, status, formType);
     }
 
     // Pour ADMIN ou si organisationId est spécifié

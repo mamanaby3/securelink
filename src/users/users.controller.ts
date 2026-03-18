@@ -571,7 +571,8 @@ Peut voir **les documents de n'importe quel utilisateur**
       throw new ForbiddenException('Vous ne pouvez voir que vos propres documents');
     }
 
-    return this.usersProfileService.getUserDocuments(id);
+    // Retourner avec URLs d'aperçu présignées pour l'admin (miniatures)
+    return this.usersProfileService.getUserDocumentsWithPreviews(id);
   }
 
   @Patch(':id')
