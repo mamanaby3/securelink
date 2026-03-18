@@ -62,6 +62,25 @@ export class VerificationsService {
     return fallbackType || 'Document';
   }
 
+  /** Normalise un champ date (DB: string YYYY-MM-DD ou Date) vers YYYY-MM-DD. */
+  private toYyyyMmDd(value: unknown): string | undefined {
+    if (!value) return undefined;
+    if (typeof value === 'string') {
+      const s = value.trim();
+      if (!s) return undefined;
+      // souvent déjà au format YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // fallback : tenter de parser
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return undefined;
+    }
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    return undefined;
+  }
+
   async create(verifyDocumentDto: VerifyDocumentDto): Promise<Verification> {
     // Simulation de la vérification IA
     const aiResults = {
@@ -212,8 +231,8 @@ export class VerificationsService {
           type: String(document.type),
           fileName: document.fileName,
           mimeType: document.mimeType,
-          issueDate: document.issueDate ? document.issueDate.toISOString().slice(0, 10) : undefined,
-          expirationDate: document.expirationDate ? document.expirationDate.toISOString().slice(0, 10) : undefined,
+          issueDate: this.toYyyyMmDd((document as any).issueDate),
+          expirationDate: this.toYyyyMmDd((document as any).expirationDate),
         };
       }
     } catch {
