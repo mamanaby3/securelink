@@ -41,6 +41,27 @@ export class VerificationsService {
     private readonly emailService: EmailService,
   ) {}
 
+  /** Libellé humain du document (préférer document_types.title). */
+  private async getDocumentDisplayTitle(documentId: string, fallbackType?: string): Promise<string> {
+    try {
+      const userDocument = await this.userDocumentRepository.findOne({ where: { id: documentId } });
+      if (userDocument?.documentTypeId) {
+        const docType = await this.documentTypeRepository.findOne({ where: { id: userDocument.documentTypeId } });
+        if (docType?.title?.trim()) return docType.title.trim();
+      }
+      const t = String(userDocument?.type ?? fallbackType ?? '').toUpperCase();
+      if (t === 'CARTE_IDENTITE') return 'Carte d’identité';
+      if (t === 'CERTIFICAT_NATIONALITE') return 'Certificat de nationalité';
+      if (t === 'EXTRAIT_NAISSANCE') return 'Extrait de naissance';
+      if (t === 'PASSEPORT') return 'Passeport';
+      if (t === 'PERMIS_CONDUIRE') return 'Permis de conduire';
+      if (t === 'SELFIE') return 'Selfie';
+    } catch {
+      // ignore
+    }
+    return fallbackType || 'Document';
+  }
+
   async create(verifyDocumentDto: VerifyDocumentDto): Promise<Verification> {
     // Simulation de la vérification IA
     const aiResults = {
@@ -352,10 +373,14 @@ export class VerificationsService {
     try {
       const client = await this.userRepository.findOne({ where: { id: verification.clientId } });
       if (client) {
+        const documentTitle = await this.getDocumentDisplayTitle(
+          verification.documentId,
+          String(verification.documentType),
+        );
         await this.emailService.sendDocumentValidatedEmail(
           client.email,
           client.name,
-          verification.documentType,
+          documentTitle,
         );
       }
     } catch (error) {
@@ -394,10 +419,14 @@ export class VerificationsService {
     try {
       const client = await this.userRepository.findOne({ where: { id: verification.clientId } });
       if (client) {
+        const documentTitle = await this.getDocumentDisplayTitle(
+          verification.documentId,
+          String(verification.documentType),
+        );
         await this.emailService.sendDocumentRejectedEmail(
           client.email,
           client.name,
-          verification.documentType,
+          documentTitle,
           rejectDto.reason,
         );
       }
