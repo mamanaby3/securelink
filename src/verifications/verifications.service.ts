@@ -194,6 +194,19 @@ export class VerificationsService {
         where: { id: verification.documentId },
       });
       if (document) {
+        // Enrichir avec le titre du type de document (document_types.title) si disponible
+        try {
+          if (document.documentTypeId) {
+            const docType = await this.documentTypeRepository.findOne({
+              where: { id: document.documentTypeId },
+            });
+            if (docType?.title) {
+              (result as any).documentTypeTitle = docType.title;
+            }
+          }
+        } catch {
+          // ignorer si type introuvable
+        }
         result.document = {
           id: document.id,
           type: String(document.type),
