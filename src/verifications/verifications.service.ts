@@ -318,8 +318,10 @@ export class VerificationsService {
     verification.status = VerificationStatus.EN_COURS;
     verification.score = score;
     verification.aiResults = aiResults;
-    verification.humanVerification = undefined;
-    verification.validatedAt = undefined;
+    // TypeORM peut ne pas considérer `undefined` comme un changement,
+    // on force donc à `null` pour remettre à zéro.
+    verification.humanVerification = null;
+    verification.validatedAt = null;
     verification.submittedAt = new Date();
 
     return await this.verificationRepository.save(verification);

@@ -141,9 +141,9 @@ export class RequestsService {
         }
 
         // Vérifier que le document n'est pas expiré
-        // Si expirationDate est null, le document n'a pas de date d'expiration (valide)
-        // Si expirationDate existe, elle doit être dans le futur
-        if (doc.expirationDate) {
+        // Si le type de document n'a pas d'expiration (ex: extrait de naissance),
+        // alors on ignore expirationDate même si elle est stockée.
+        if (docType.hasExpirationDate && doc.expirationDate) {
           const expirationDate = new Date(doc.expirationDate);
           expirationDate.setHours(0, 0, 0, 0);
           if (expirationDate <= today) {
