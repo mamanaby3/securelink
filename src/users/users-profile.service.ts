@@ -337,6 +337,9 @@ export class UsersProfileService {
             };
         });
 
+        // Map documentTypeId -> title (nom créé par l'admin) pour afficher le vrai nom au lieu de "Autre"
+        const docTypeTitleById = new Map(allActiveDocumentTypes.map((dt) => [dt.id, dt.title]));
+
         // Construire la liste des documents uploadés avec URL d'aperçu (présignée)
         const uploadedDocuments: Array<{
             id: string;
@@ -368,10 +371,11 @@ export class UsersProfileService {
                     }
                 }
             }
+            const label = (doc.documentTypeId && docTypeTitleById.get(doc.documentTypeId)) || this.getDocumentLabel(doc.type);
             uploadedDocuments.push({
                 id: doc.id,
                 type: doc.type,
-                label: this.getDocumentLabel(doc.type),
+                label,
                 fileName: doc.fileName,
                 status: doc.status,
                 issueDate: doc.issueDate,
@@ -590,9 +594,12 @@ export class UsersProfileService {
      * Récupère les documents du profil avec une URL d'aperçu fraîche (présignée).
      * Utilisé par le front pour afficher les miniatures (images et 1re page PDF).
      */
-    async getUserDocumentsWithPreviews(userId: string): Promise<Array<Record<string, unknown> & { id: string; documentTypeId?: string; fileName: string; mimeType: string; previewUrl?: string | null }>> {
+    async getUserDocumentsWithPreviews(userId: string): Promise<Array<Record<string, unknown> & { id: string; documentTypeId?: string; label?: string; fileName: string; mimeType: string; previewUrl?: string | null }>> {
         const documents = await this.getUserDocuments(userId);
-        const result: Array<Record<string, unknown> & { id: string; documentTypeId?: string; fileName: string; mimeType: string; previewUrl?: string | null }> = [];
+        const docTypes = await this.documentTypeRepository.find({ where: { isActive: true } });
+        const docTypeTitleById = new Map(docTypes.map((dt) => [dt.id, dt.title]));
+
+        const result: Array<Record<string, unknown> & { id: string; documentTypeId?: string; label?: string; fileName: string; mimeType: string; previewUrl?: string | null }> = [];
         for (const doc of documents) {
             let previewUrl: string | null = null;
             if (doc.filePath) {
@@ -611,11 +618,13 @@ export class UsersProfileService {
                     }
                 }
             }
+            const label = (doc.documentTypeId && docTypeTitleById.get(doc.documentTypeId)) || this.getDocumentLabel(doc.type);
             result.push({
                 id: doc.id,
                 userId: doc.userId,
                 type: doc.type,
                 documentTypeId: doc.documentTypeId ?? undefined,
+                label,
                 fileName: doc.fileName,
                 filePath: doc.filePath,
                 fileSize: doc.fileSize,
@@ -692,7 +701,7 @@ export class UsersProfileService {
             document.expirationDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
         }
 
-        // Si le document est validé et qu'on modifie les dates, remettre en attente
+        // Comme pour la modification photo : toute modification (dates incluses) remet en attente de validation
         if (document.status === DocumentStatus.VALIDE && (updateDto.issueDate || updateDto.expirationDate)) {
             document.status = DocumentStatus.EN_ATTENTE;
             document.isVerified = false;
