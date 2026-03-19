@@ -22,6 +22,15 @@ export class SaveDraftRequestDto {
   organisationId?: string;
 
   @ApiProperty({
+    description: 'ID du client à qui appartient le brouillon (ADMIN/ORGANISATION uniquement)',
+    example: 'user-123',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  clientId?: string;
+
+  @ApiProperty({
     description: 'Informations sur le bénéficiaire (étape 2)',
     required: false,
   })

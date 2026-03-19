@@ -516,7 +516,10 @@ export class UsersProfileService {
 
                     // Vérifier si une vérification existe déjà pour ce document
                     const existingVerification = await this.verificationsService.findByDocumentId(savedDocument.id);
-                    if (!existingVerification) {
+                    if (existingVerification) {
+                        // Le document a été remplacé : repasser la vérification en "à traiter"
+                        await this.verificationsService.resetForDocumentReupload(savedDocument.id);
+                    } else {
                         await this.verificationsService.createFromDocument({
                             documentId: savedDocument.id,
                             clientId: userId,

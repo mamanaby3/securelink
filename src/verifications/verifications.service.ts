@@ -293,6 +293,39 @@ export class VerificationsService {
   }
 
   /**
+   * Quand un client remplace/ré-upload un document rejeté,
+   * on doit remettre la vérification humaine en état "à traiter" (EN_COURS),
+   * sinon l'admin verra encore REJETE et les boutons restent bloqués.
+   */
+  async resetForDocumentReupload(documentId: string): Promise<Verification | null> {
+    const verification = await this.findByDocumentId(documentId);
+    if (!verification) return null;
+
+    // Simulation "nouveau scan" pour l'affichage (facultatif mais utile)
+    const aiResults = {
+      formatConforme: Math.random() > 0.2,
+      bonneLisibilite: Math.random() > 0.2,
+      coherenceInformations: Math.random() > 0.2,
+    };
+    const score = Math.floor(
+      ((aiResults.formatConforme ? 1 : 0) +
+        (aiResults.bonneLisibilite ? 1 : 0) +
+        (aiResults.coherenceInformations ? 1 : 0)) *
+        (100 / 3) +
+        Math.random() * 20,
+    );
+
+    verification.status = VerificationStatus.EN_COURS;
+    verification.score = score;
+    verification.aiResults = aiResults;
+    verification.humanVerification = undefined;
+    verification.validatedAt = undefined;
+    verification.submittedAt = new Date();
+
+    return await this.verificationRepository.save(verification);
+  }
+
+  /**
    * Crée une vérification automatiquement depuis un document uploadé
    */
   async createFromDocument(createDto: CreateFromDocumentDto): Promise<Verification> {

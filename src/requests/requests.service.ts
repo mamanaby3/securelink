@@ -170,7 +170,12 @@ export class RequestsService {
   /**
    * Crée ou met à jour un brouillon de demande (pour le processus par étapes)
    */
-  async saveDraft(clientId: string, draftDto: SaveDraftRequestDto, existingDraftId?: string): Promise<Request> {
+  async saveDraft(
+    clientId: string,
+    draftDto: SaveDraftRequestDto,
+    existingDraftId?: string,
+    actor?: { role?: string; organisationId?: string },
+  ): Promise<Request> {
     // Récupérer le client
     const client = await this.userRepository.findOne({
       where: { id: clientId },
@@ -178,6 +183,17 @@ export class RequestsService {
 
     if (!client) {
       throw new NotFoundException('Client non trouvé');
+    }
+
+    // Sécurité : si l'acteur est une organisation, on ne lui permet de créer des brouillons
+    // que pour des clients appartenant à sa propre organisation.
+    if (actor?.role === UserRole.ORGANISATION) {
+      const orgId = actor.organisationId;
+      if (!orgId) throw new ForbiddenException('Organisation non identifiée');
+
+      if (client.organisationId !== orgId) {
+        throw new ForbiddenException('Vous ne pouvez créer un brouillon que pour vos clients');
+      }
     }
 
     // Si un brouillon existe, le mettre à jour
@@ -766,11 +782,32 @@ export class RequestsService {
    * Génère un JWT court terme pour l'upload du PDF rempli depuis l'app PDF (cross-origin).
    * Le token est validé par JwtOrUploadTokenGuard sur POST/PUT upload-filled-pdf.
    */
-  async getUploadToken(requestId: string, userId: string, userRole: string): Promise<string> {
+  async getUploadToken(
+    requestId: string,
+    userId: string,
+    userRole: string,
+    organisationId?: string,
+  ): Promise<string> {
     const request = await this.findOne(requestId);
-    if (userRole !== UserRole.ADMIN && request.clientId !== userId) {
-      throw new ForbiddenException('Vous ne pouvez obtenir un token d\'upload que pour vos propres demandes');
+
+    if (userRole === UserRole.ADMIN) {
+      // ADMIN : autorisé
+    } else if (userRole === UserRole.CLIENT) {
+      if (request.clientId !== userId) {
+        throw new ForbiddenException('Vous ne pouvez obtenir un token d\'upload que pour vos propres demandes');
+      }
+    } else if (userRole === UserRole.ORGANISATION) {
+      if (!organisationId) throw new ForbiddenException('Organisation non identifiée');
+      if (!request.organisationId || request.organisationId !== organisationId) {
+        throw new ForbiddenException('Vous ne pouvez obtenir un token d\'upload que pour les demandes de votre organisation');
+      }
+      if (!request.client?.organisationId || request.client.organisationId !== organisationId) {
+        throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
+      }
+    } else {
+      throw new ForbiddenException('Rôle non autorisé pour l’upload');
     }
+
     return this.jwtService.sign(
       { requestId, type: 'upload' },
       { expiresIn: this.UPLOAD_TOKEN_EXPIRATION },

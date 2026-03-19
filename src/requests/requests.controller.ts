@@ -51,7 +51,7 @@ export class RequestsController {
   constructor(private readonly requestsService: RequestsService) { }
 
   @Post('draft')
-  @Roles(UserRole.CLIENT)
+  @Roles(UserRole.CLIENT, UserRole.ORGANISATION, UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiTags('Clients')
   @ApiOperation({
@@ -96,7 +96,20 @@ export class RequestsController {
     @CurrentUser() user: any,
     @Query('draftId') draftId?: string,
   ) {
-    const draft = await this.requestsService.saveDraft(user.userId, draftDto, draftId);
+    const actor = {
+      role: user?.role,
+      organisationId: user?.organisationId,
+    };
+
+    // Pour les clients : le clientId vient du token.
+    // Pour ADMIN/ORGANISATION : le clientId doit être fourni dans le body.
+    const targetClientId = user?.role === UserRole.CLIENT ? user.userId : draftDto.clientId;
+
+    if (!targetClientId) {
+      throw new BadRequestException('clientId est requis pour les rôles ADMIN/ORGANISATION');
+    }
+
+    const draft = await this.requestsService.saveDraft(targetClientId, draftDto, draftId, actor);
 
     // Déterminer l'étape actuelle
     let currentStep = 1;
@@ -111,7 +124,7 @@ export class RequestsController {
   }
 
   @Post(':id/submit')
-  @Roles(UserRole.CLIENT)
+  @Roles(UserRole.CLIENT, UserRole.ORGANISATION, UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiTags('Clients')
   @ApiOperation({
@@ -164,13 +177,28 @@ export class RequestsController {
     @Body('verificationEmail') verificationEmail?: string,
   ) {
     const userId = user?.userId ?? user?.sub;
-    if (!userId) {
-      throw new ForbiddenException('Utilisateur non identifié');
-    }
-    // Vérifier que le client ne peut soumettre que ses propres brouillons
+    if (!userId) throw new ForbiddenException('Utilisateur non identifié');
+
+    // Vérifier que seul le bon acteur peut soumettre ce brouillon
     const draft = await this.requestsService.findOne(id);
-    if (draft.clientId !== userId) {
-      throw new ForbiddenException('Vous ne pouvez soumettre que vos propres demandes');
+
+    if (user?.role === UserRole.CLIENT) {
+      if (draft.clientId !== userId) {
+        throw new ForbiddenException('Vous ne pouvez soumettre que vos propres demandes');
+      }
+    }
+
+    if (user?.role === UserRole.ORGANISATION) {
+      const orgId = user?.organisationId;
+      if (!orgId) throw new ForbiddenException('Organisation non identifiée');
+
+      // Le brouillon doit être lié à l'organisation + au client de la même organisation
+      if (!draft.organisationId || draft.organisationId !== orgId) {
+        throw new ForbiddenException('Vous ne pouvez soumettre que des demandes liées à votre organisation');
+      }
+      if (!draft.client?.organisationId || draft.client.organisationId !== orgId) {
+        throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
+      }
     }
 
     const request = await this.requestsService.submitRequest(id, verificationEmail);
@@ -633,7 +661,7 @@ Cette méthode crée directement une demande soumise (ancien comportement).
   }
 
   @Get(':id/upload-token')
-  @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
   @HttpCode(HttpStatus.OK)
   @ApiTags('Clients')
   @ApiOperation({
@@ -646,12 +674,17 @@ Cette méthode crée directement une demande soumise (ancien comportement).
     @Param('id') id: string,
     @CurrentUser() user: any,
   ) {
-    const uploadToken = await this.requestsService.getUploadToken(id, user.userId, user.role);
+    const uploadToken = await this.requestsService.getUploadToken(
+      id,
+      user.userId,
+      user.role,
+      user.organisationId
+    );
     return { uploadToken };
   }
 
   @Post(':id/upload-filled-pdf')
-  @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
   @UseInterceptors(FileInterceptor('file'))
   @HttpCode(HttpStatus.OK)
   @ApiTags('Clients')
@@ -696,6 +729,18 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
     }
 
+    if (user.role === UserRole.ORGANISATION) {
+      const orgId = user?.organisationId;
+      if (!orgId) throw new ForbiddenException('Organisation non identifiée');
+
+      if (!request.organisationId || request.organisationId !== orgId) {
+        throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour des demandes liées à votre organisation');
+      }
+      if (!request.client?.organisationId || request.client.organisationId !== orgId) {
+        throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
+      }
+    }
+
     let editorState: unknown = undefined;
     if (editorStateRaw != null && String(editorStateRaw).trim() !== '') {
       try {
@@ -722,7 +767,7 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
   }
 
   @Put(':id/upload-filled-pdf')
-  @Roles(UserRole.CLIENT, UserRole.ADMIN)
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.ORGANISATION)
   @UseInterceptors(FileInterceptor('file'))
   @HttpCode(HttpStatus.OK)
   @ApiTags('Clients')
@@ -753,6 +798,18 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
     const request = await this.requestsService.findOne(id);
     if (user.role === UserRole.CLIENT && request.clientId !== user.userId) {
       throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour vos propres demandes');
+    }
+
+    if (user.role === UserRole.ORGANISATION) {
+      const orgId = user?.organisationId;
+      if (!orgId) throw new ForbiddenException('Organisation non identifiée');
+
+      if (!request.organisationId || request.organisationId !== orgId) {
+        throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour des demandes liées à votre organisation');
+      }
+      if (!request.client?.organisationId || request.client.organisationId !== orgId) {
+        throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
+      }
     }
     let editorState: unknown = undefined;
     if (editorStateRaw != null && String(editorStateRaw).trim() !== '') {
