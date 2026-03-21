@@ -14,14 +14,17 @@ import { SecurityModule } from '../security/security.module';
 import { DocumentType } from '../documents/entities/document-type.entity';
 import { VerificationsModule } from '../verifications/verifications.module';
 import { CommonModule } from '../common/common.module';
+import { Role } from '../settings/entities/role.entity';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserDocument, UserIdentityDocument, Organisation, DocumentType]),
+    TypeOrmModule.forFeature([User, UserDocument, UserIdentityDocument, Organisation, DocumentType, Role]),
     RequestsModule,
     SecurityModule,
     VerificationsModule,
     CommonModule,
+    AuditLogsModule,
   ],
   controllers: [UsersController, ClientsController],
   providers: [UsersService, UsersProfileService, DocumentExpirationService],

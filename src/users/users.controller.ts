@@ -17,7 +17,9 @@ import {
   InternalServerErrorException,
   HttpException,
   StreamableFile,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -53,6 +55,8 @@ import { User } from '../auth/entities/user.entity';
 import { RequestStatus } from '../requests/entities/request.entity';
 import { DocumentStatus } from './entities/user-document.entity';
 import { MinioService } from '../storage/minio.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { AuditAction, AuditStatus } from '../audit-logs/entities/audit-log.entity';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -63,7 +67,26 @@ export class UsersController {
     private readonly usersProfileService: UsersProfileService,
     private readonly requestsService: RequestsService,
     private readonly minioService: MinioService,
+    private readonly auditLogsService: AuditLogsService,
   ) { }
+
+  private async logUserAudit(
+    currentUser: any,
+    req: Request,
+    status: AuditStatus,
+    resource: string,
+    metadata?: any,
+  ): Promise<void> {
+    await this.auditLogsService.create({
+      userId: currentUser?.userId,
+      userName: currentUser?.name || currentUser?.email,
+      action: AuditAction.MODIFIER_UTILISATEUR,
+      resource,
+      ipAddress: req.ip || 'unknown',
+      status,
+      metadata,
+    });
+  }
 
   @Post()
   @Roles(UserRole.ADMIN)
@@ -102,8 +125,31 @@ export class UsersController {
   @ApiResponse({ status: 403, description: 'Accès refusé' })
   @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
   @ApiResponse({ status: 404, description: 'Organisation non trouvée' })
-  async create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  async create(@Body() createUserDto: CreateUserDto, @CurrentUser() currentUser: any, @Req() req: Request) {
+    try {
+      const result = await this.usersService.create(createUserDto);
+      await this.auditLogsService.create({
+        userId: currentUser?.userId,
+        userName: currentUser?.name || currentUser?.email,
+        action: AuditAction.CREER_UTILISATEUR,
+        resource: `users:${result.user.id}`,
+        ipAddress: req.ip || 'unknown',
+        status: AuditStatus.SUCCES,
+        metadata: { role: result.user.role, organisationId: result.user.organisationId },
+      });
+      return result;
+    } catch (error) {
+      await this.auditLogsService.create({
+        userId: currentUser?.userId,
+        userName: currentUser?.name || currentUser?.email,
+        action: AuditAction.CREER_UTILISATEUR,
+        resource: 'users:create',
+        ipAddress: req.ip || 'unknown',
+        status: AuditStatus.ECHEC,
+        metadata: { message: error?.message },
+      });
+      throw error;
+    }
   }
 
   @Post('organisation')
@@ -148,6 +194,7 @@ export class UsersController {
   async createOrganisationUser(
     @Body() createUserDto: CreateOrganisationUserDto,
     @CurrentUser() user: any,
+    @Req() req: Request,
   ) {
     // L'organisationId est automatiquement celui de l'utilisateur connecté
     if (!user.organisationId) {
@@ -157,7 +204,30 @@ export class UsersController {
         'Si vous êtes ORGANISATION, vérifiez que votre compte a bien un organisationId dans la base de données.'
       );
     }
-    return this.usersService.createOrganisationUser(createUserDto, user.organisationId);
+    try {
+      const result = await this.usersService.createOrganisationUser(createUserDto, user.organisationId);
+      await this.auditLogsService.create({
+        userId: user?.userId,
+        userName: user?.name || user?.email,
+        action: AuditAction.CREER_UTILISATEUR,
+        resource: `users:${result.user.id}`,
+        ipAddress: req.ip || 'unknown',
+        status: AuditStatus.SUCCES,
+        metadata: { role: result.user.role, organisationId: result.user.organisationId },
+      });
+      return result;
+    } catch (error) {
+      await this.auditLogsService.create({
+        userId: user?.userId,
+        userName: user?.name || user?.email,
+        action: AuditAction.CREER_UTILISATEUR,
+        resource: 'users:organisation:create',
+        ipAddress: req.ip || 'unknown',
+        status: AuditStatus.ECHEC,
+        metadata: { message: error?.message },
+      });
+      throw error;
+    }
   }
 
   @Get()
@@ -172,6 +242,12 @@ export class UsersController {
   @ApiQuery({ name: 'status', required: false, description: 'Filtrer par statut (active/inactive)' })
   @ApiQuery({ name: 'type', required: false, description: 'Filtrer par type (NOTAIRE, BANQUE, ASSURANCE, HUISSIER, CLIENT)' })
   @ApiQuery({ name: 'role', required: false, description: 'Filtrer par rôle application (ADMIN, ORGANISATION, CLIENT)' })
+  @ApiQuery({
+    name: 'clientEmail',
+    required: false,
+    description:
+      'Pour ORGANISATION + role=CLIENT : filtre par e-mail (recherche exacte, insensible à la casse). Inclut les clients sans organisationId.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Liste des utilisateurs',
@@ -201,8 +277,10 @@ export class UsersController {
     @Query('status') status?: string,
     @Query('type') type?: string,
     @Query('role') role?: string,
+    @Query('clientEmail') clientEmail?: string,
+    @CurrentUser() currentUser?: any,
   ) {
-    return this.usersService.findAll(status, type, role);
+    return this.usersService.findAllForRequester(currentUser, status, type, role, clientEmail);
   }
 
   @Get('statistics')
@@ -215,8 +293,8 @@ export class UsersController {
     description: 'Retourne les statistiques globales des utilisateurs. **Rôles autorisés:** ADMIN, SUPERVISEUR (organisation), ADMINISTRATION (organisation)'
   })
   @ApiResponse({ status: 200, description: 'Statistiques des utilisateurs' })
-  async getStatistics() {
-    return this.usersService.getStatistics();
+  async getStatistics(@CurrentUser() currentUser: any) {
+    return this.usersService.getStatisticsForRequester(currentUser);
   }
 
   @Get('admin/documents/:documentId/file')
@@ -263,8 +341,8 @@ export class UsersController {
   @ApiParam({ name: 'id', description: 'ID de l\'utilisateur' })
   @ApiResponse({ status: 200, description: 'Détails de l\'utilisateur' })
   @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
-  async findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  async findOne(@Param('id') id: string, @CurrentUser() currentUser: any) {
+    return this.usersService.findOneForRequester(id, currentUser);
   }
 
   @Get(':id/overview')
@@ -452,9 +530,10 @@ Par défaut, retourne les demandes du client (pour compatibilité)
     @Param('id') id: string,
     @Query('status') status?: string,
     @Query('formType') formType?: string,
+    @CurrentUser() currentUser?: any,
   ) {
-    // Récupérer l'utilisateur pour connaître son rôle
-    const user = await this.usersService.findOne(id);
+    // Sécurité: valide l'accès au profil ciblé selon le requester.
+    const user = await this.usersService.findOneForRequester(id, currentUser);
 
     // Logique selon le rôle
     if (user.role === UserRole.CLIENT) {
@@ -591,15 +670,23 @@ Peut voir **les documents de n'importe quel utilisateur**
   async update(
     @Param('id') id: string,
     @Body() updateUserDto: UpdateUserDto,
+    @CurrentUser() currentUser: any,
+    @Req() req: Request,
     @UploadedFile() profilePicture?: any,
   ) {
-    if (profilePicture) {
-      // Sauvegarder la photo de profil dans un dossier
-      const profilePicturePath = await this.usersService.saveProfilePicture(id, profilePicture);
-      // Ajouter le chemin de la photo au DTO
-      (updateUserDto as any).profilePicture = profilePicturePath;
+    try {
+      await this.usersService.findOneForRequester(id, currentUser);
+      if (profilePicture) {
+        const profilePicturePath = await this.usersService.saveProfilePicture(id, profilePicture);
+        (updateUserDto as any).profilePicture = profilePicturePath;
+      }
+      const updated = await this.usersService.update(id, updateUserDto);
+      await this.logUserAudit(currentUser, req, AuditStatus.SUCCES, `users:${id}`, { fields: Object.keys(updateUserDto || {}) });
+      return updated;
+    } catch (error) {
+      await this.logUserAudit(currentUser, req, AuditStatus.ECHEC, `users:${id}`, { message: error?.message });
+      throw error;
     }
-    return this.usersService.update(id, updateUserDto);
   }
 
   @Delete(':id')
@@ -629,8 +716,15 @@ Peut voir **les documents de n'importe quel utilisateur**
   @ApiParam({ name: 'id', description: 'ID de l\'utilisateur' })
   @ApiResponse({ status: 200, description: 'Utilisateur activé' })
   @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
-  async activate(@Param('id') id: string) {
-    return this.usersService.activate(id);
+  async activate(@Param('id') id: string, @CurrentUser() currentUser: any, @Req() req: Request) {
+    try {
+      const activated = await this.usersService.activateForRequester(id, currentUser);
+      await this.logUserAudit(currentUser, req, AuditStatus.SUCCES, `users:${id}:activate`);
+      return activated;
+    } catch (error) {
+      await this.logUserAudit(currentUser, req, AuditStatus.ECHEC, `users:${id}:activate`, { message: error?.message });
+      throw error;
+    }
   }
 
   @Post(':id/deactivate')
@@ -644,8 +738,15 @@ Peut voir **les documents de n'importe quel utilisateur**
   @ApiParam({ name: 'id', description: 'ID de l\'utilisateur' })
   @ApiResponse({ status: 200, description: 'Utilisateur désactivé' })
   @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
-  async deactivate(@Param('id') id: string) {
-    return this.usersService.deactivate(id);
+  async deactivate(@Param('id') id: string, @CurrentUser() currentUser: any, @Req() req: Request) {
+    try {
+      const deactivated = await this.usersService.deactivateForRequester(id, currentUser);
+      await this.logUserAudit(currentUser, req, AuditStatus.SUCCES, `users:${id}:deactivate`);
+      return deactivated;
+    } catch (error) {
+      await this.logUserAudit(currentUser, req, AuditStatus.ECHEC, `users:${id}:deactivate`, { message: error?.message });
+      throw error;
+    }
   }
 
   // ========== Endpoints pour la complétion du profil client ==========

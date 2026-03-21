@@ -44,6 +44,7 @@ import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { UserRole } from './dto/register.dto';
 import { IpAddress } from '../common/decorators/ip-address.decorator';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Authentification')
 @Controller('auth')
@@ -184,6 +185,7 @@ export class AuthController {
     }
 
     @Post('login')
+    @Throttle({ long: { limit: 10, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @UseGuards(LocalAuthGuard)
     @ApiOperation({
@@ -220,6 +222,7 @@ export class AuthController {
     }
 
     @Post('login/admin')
+    @Throttle({ long: { limit: 8, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @UseGuards(LocalAuthGuard)
     @ApiOperation({
@@ -256,6 +259,7 @@ export class AuthController {
     }
 
     @Post('login/client')
+    @Throttle({ long: { limit: 10, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Connexion d\'un client',
@@ -291,6 +295,7 @@ export class AuthController {
     }
 
     @Post('login/organisation')
+    @Throttle({ long: { limit: 8, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @UseGuards(LocalAuthGuard)
     @ApiOperation({
@@ -453,6 +458,7 @@ export class AuthController {
 
 
     @Post('forget-password/request')
+    @Throttle({ long: { limit: 5, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Demander une réinitialisation de mot de passe (envoi de code otp)',
@@ -479,6 +485,7 @@ export class AuthController {
     }
 
     @Post('forget-password/resend-otp')
+    @Throttle({ long: { limit: 4, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Renvoyer le code OTP',
@@ -506,6 +513,7 @@ export class AuthController {
     }
 
     @Post('forget-password/verify-otp')
+    @Throttle({ long: { limit: 6, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Vérifier le code OTP',
@@ -532,6 +540,7 @@ export class AuthController {
     }
 
     @Post('forget-password/reset')
+    @Throttle({ long: { limit: 4, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Réinitialiser le mot de passe',
@@ -578,6 +587,7 @@ export class AuthController {
     }
 
     @Post('setup-password')
+    @Throttle({ long: { limit: 4, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Créer le mot de passe après inscription',
@@ -616,6 +626,7 @@ export class AuthController {
     }
 
     @Get('verify-password-setup-token')
+    @Throttle({ long: { limit: 10, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Vérifier le token de création de mot de passe',
@@ -644,6 +655,7 @@ export class AuthController {
     }
 
     @Post('resend-password-setup-link')
+    @Throttle({ long: { limit: 4, ttl: 60000 } })
     @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary: 'Renvoyer le lien de création de mot de passe',

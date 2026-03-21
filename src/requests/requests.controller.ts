@@ -196,7 +196,8 @@ export class RequestsController {
       if (!draft.organisationId || draft.organisationId !== orgId) {
         throw new ForbiddenException('Vous ne pouvez soumettre que des demandes liées à votre organisation');
       }
-      if (!draft.client?.organisationId || draft.client.organisationId !== orgId) {
+      const cOrg = draft.client?.organisationId;
+      if (cOrg != null && String(cOrg).trim() !== '' && cOrg !== orgId) {
         throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
       }
     }
@@ -736,7 +737,8 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       if (!request.organisationId || request.organisationId !== orgId) {
         throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour des demandes liées à votre organisation');
       }
-      if (!request.client?.organisationId || request.client.organisationId !== orgId) {
+      const cOrgPost = request.client?.organisationId;
+      if (cOrgPost != null && String(cOrgPost).trim() !== '' && cOrgPost !== orgId) {
         throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
       }
     }
@@ -807,7 +809,8 @@ Le fichier est stocké dans MinIO et devient le formulaire officiel de la demand
       if (!request.organisationId || request.organisationId !== orgId) {
         throw new ForbiddenException('Vous ne pouvez attacher un PDF que pour des demandes liées à votre organisation');
       }
-      if (!request.client?.organisationId || request.client.organisationId !== orgId) {
+      const cOrgPut = request.client?.organisationId;
+      if (cOrgPut != null && String(cOrgPut).trim() !== '' && cOrgPut !== orgId) {
         throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
       }
     }

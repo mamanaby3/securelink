@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateSectorDto } from './dto/create-sector.dto';
@@ -18,6 +18,18 @@ export class SettingsService {
     @InjectRepository(Role)
     private roleRepository: Repository<Role>,
   ) {}
+
+  private normalizeName(value: string): string {
+    return (value || '').trim().replace(/\s+/g, ' ');
+  }
+
+  private assertRoleNameAllowed(name: string): void {
+    const normalized = this.normalizeName(name).toUpperCase();
+    const blocked = ['ADMIN', 'CLIENT', 'ORGANISATION', 'ORGANIZATION', 'ADMINISTRATEUR SYSTEME'];
+    if (blocked.includes(normalized)) {
+      throw new BadRequestException('Ce rôle est réservé au système et ne peut pas être créé/modifié ici');
+    }
+  }
 
   // Sectors
   async createSector(createSectorDto: CreateSectorDto) {
@@ -101,8 +113,9 @@ export class SettingsService {
 
   // Roles
   async createRole(createRoleDto: CreateRoleDto) {
+    this.assertRoleNameAllowed(createRoleDto.name);
     const newRole = this.roleRepository.create({
-      name: createRoleDto.name,
+      name: this.normalizeName(createRoleDto.name),
       description: createRoleDto.description,
       isActive: true,
     });
@@ -126,7 +139,8 @@ export class SettingsService {
 
   async updateRole(id: string, updateRoleDto: CreateRoleDto) {
     const role = await this.findOneRole(id);
-    role.name = updateRoleDto.name;
+    this.assertRoleNameAllowed(updateRoleDto.name);
+    role.name = this.normalizeName(updateRoleDto.name);
     if (updateRoleDto.description !== undefined) {
       role.description = updateRoleDto.description;
     }

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Brackets } from 'typeorm';
 import { QueryFailedError } from 'typeorm';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { SaveDraftRequestDto } from './dto/save-draft-request.dto';
@@ -191,7 +191,8 @@ export class RequestsService {
       const orgId = actor.organisationId;
       if (!orgId) throw new ForbiddenException('Organisation non identifiée');
 
-      if (client.organisationId !== orgId) {
+      const cOrg = client.organisationId;
+      if (cOrg != null && String(cOrg).trim() !== '' && cOrg !== orgId) {
         throw new ForbiddenException('Vous ne pouvez créer un brouillon que pour vos clients');
       }
     }
@@ -801,7 +802,12 @@ export class RequestsService {
       if (!request.organisationId || request.organisationId !== organisationId) {
         throw new ForbiddenException('Vous ne pouvez obtenir un token d\'upload que pour les demandes de votre organisation');
       }
-      if (!request.client?.organisationId || request.client.organisationId !== organisationId) {
+      const cOrg = request.client?.organisationId;
+      if (
+        cOrg != null &&
+        String(cOrg).trim() !== '' &&
+        cOrg !== organisationId
+      ) {
         throw new ForbiddenException('Le client sélectionné n’appartient pas à votre organisation');
       }
     } else {
@@ -820,13 +826,29 @@ export class RequestsService {
       .leftJoinAndSelect('request.organisation', 'organisation')
       .where('request.organisationId = :organisationId', { organisationId });
 
-    // Exclure les brouillons et les demandes avec OTP non vérifié pour l'organisation
+    /**
+     * Par défaut : exclure les brouillons (sauf « Mise à jour » à compléter par l’org.)
+     * et les EN_ATTENTE sans OTP vérifié.
+     * Les brouillons dont le nom de formulaire contient « mise » + « jour » restent visibles
+     * pour que l’agent ouvre le détail et lance secure-pdf.
+     */
     queryBuilder.andWhere(
-      '(request.status != :draftStatus AND NOT (request.status = :enAttenteStatus AND (request.otpVerified = false OR request.otpVerified IS NULL)))',
-      {
-        draftStatus: RequestStatus.BROUILLON,
-        enAttenteStatus: RequestStatus.EN_ATTENTE,
-      },
+      new Brackets((qb) => {
+        qb.where(
+          '(request.status != :draftStatus AND NOT (request.status = :enAttenteStatus AND (request.otpVerified = false OR request.otpVerified IS NULL)))',
+          {
+            draftStatus: RequestStatus.BROUILLON,
+            enAttenteStatus: RequestStatus.EN_ATTENTE,
+          },
+        ).orWhere(
+          '(request.status = :draftStatusMise AND (LOWER(COALESCE(request.formName, \'\')) LIKE :misePattern OR LOWER(COALESCE(request.formName, \'\')) LIKE :misePatternAscii))',
+          {
+            draftStatusMise: RequestStatus.BROUILLON,
+            misePattern: '%mise%jour%',
+            misePatternAscii: '%mise a jour%',
+          },
+        );
+      }),
     );
 
     if (status) {

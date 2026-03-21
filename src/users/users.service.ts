@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -11,6 +11,7 @@ import { User } from '../auth/entities/user.entity';
 import { Organisation } from '../organisations/entities/organisation.entity';
 import { UserRole, UserType, OrganisationRole } from '../auth/dto/register.dto';
 import { MinioService } from '../storage/minio.service';
+import { Role } from '../settings/entities/role.entity';
 
 @Injectable()
 export class UsersService {
@@ -24,6 +25,8 @@ export class UsersService {
     private userRepository: Repository<User>,
     @InjectRepository(Organisation)
     private organisationRepository: Repository<Organisation>,
+    @InjectRepository(Role)
+    private roleRepository: Repository<Role>,
     private minioService: MinioService,
   ) {
     // Créer le dossier uploads/profiles s'il n'existe pas
@@ -98,10 +101,65 @@ export class UsersService {
     return password.split('').sort(() => Math.random() - 0.5).join('');
   }
 
+  private extractRequester(currentUser: any): { id: string | null; role: UserRole | null; organisationId: string | null } {
+    const id = currentUser?.userId ?? currentUser?.id ?? currentUser?.sub ?? null;
+    const role = (currentUser?.role as UserRole) ?? null;
+    const organisationId = currentUser?.organisationId ?? null;
+    return { id, role, organisationId };
+  }
+
+  private async assertOrganisationRoleIsActive(organisationRole: string): Promise<void> {
+    const normalized = (organisationRole || '').trim().toUpperCase();
+    if (!normalized) {
+      throw new BadRequestException('Le rôle organisation est obligatoire');
+    }
+    const exists = await this.roleRepository
+      .createQueryBuilder('role')
+      .where('UPPER(role.name) = :name', { name: normalized })
+      .andWhere('role.isActive = :isActive', { isActive: true })
+      .getOne();
+    if (!exists) {
+      throw new BadRequestException('Rôle organisation invalide ou inactif');
+    }
+  }
+
+  private assertCanAccessTarget(currentUser: any, target: User): void {
+    const requester = this.extractRequester(currentUser);
+    if (!requester.id || !requester.role) {
+      throw new ForbiddenException('Utilisateur non authentifié');
+    }
+
+    if (requester.role === UserRole.ADMIN) return;
+
+    if (requester.role === UserRole.ORGANISATION) {
+      if (!requester.organisationId) {
+        throw new ForbiddenException('Compte organisation invalide (organisationId manquant)');
+      }
+      if (target.role !== UserRole.ORGANISATION || target.organisationId !== requester.organisationId) {
+        throw new ForbiddenException('Accès interdit à un utilisateur hors de votre organisation');
+      }
+      return;
+    }
+
+    if (requester.role === UserRole.CLIENT) {
+      if (target.id !== requester.id) {
+        throw new ForbiddenException('Accès interdit');
+      }
+      return;
+    }
+
+    throw new ForbiddenException('Accès interdit');
+  }
+
   async create(createUserDto: CreateUserDto): Promise<{ user: User; temporaryPassword: string }> {
+    const normalizedEmail = (createUserDto.email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email invalide');
+    }
+
     // Vérifier si l'email existe déjà
     const existingUser = await this.userRepository.findOne({
-      where: { email: createUserDto.email },
+      where: { email: normalizedEmail },
     });
     if (existingUser) {
       throw new ConflictException('Cet email est déjà utilisé');
@@ -141,6 +199,7 @@ export class UsersService {
 
     // Le rôle organisation est obligatoire (validé dans le DTO)
     const finalOrganisationRole = createUserDto.organisationRole;
+    await this.assertOrganisationRoleIsActive(finalOrganisationRole);
 
     // Générer un mot de passe temporaire
     const temporaryPassword = this.generateTemporaryPassword();
@@ -168,7 +227,7 @@ export class UsersService {
       name,
       firstName: createUserDto.firstName,
       lastName: createUserDto.lastName,
-      email: createUserDto.email,
+      email: normalizedEmail,
       password: hashedPassword,
       phone: createUserDto.phone,
       role: finalRole,
@@ -197,15 +256,22 @@ export class UsersService {
     createUserDto: CreateOrganisationUserDto,
     organisationId: string,
   ): Promise<{ user: User; temporaryPassword: string }> {
+    const normalizedEmail = (createUserDto.email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new BadRequestException('Email invalide');
+    }
+
     // Vérifier si l'email existe déjà
     const existingUser = await this.userRepository.findOne({
-      where: { email: createUserDto.email },
+      where: { email: normalizedEmail },
     });
     if (existingUser) {
       throw new ConflictException('Cet email est déjà utilisé');
     }
 
     // Vérifier que l'organisation existe
+    await this.assertOrganisationRoleIsActive(createUserDto.organisationRole);
+
     const organisation = await this.organisationRepository.findOne({
       where: { id: organisationId },
     });
@@ -226,7 +292,7 @@ export class UsersService {
     // Le rôle est toujours ORGANISATION pour les utilisateurs créés par une organisation
     const newUser = this.userRepository.create({
       name: createUserDto.name,
-      email: createUserDto.email,
+      email: normalizedEmail,
       password: hashedPassword,
       phone: createUserDto.phone,
       role: UserRole.ORGANISATION, // Toujours ORGANISATION
@@ -286,6 +352,75 @@ export class UsersService {
       .getMany();
   }
 
+  async findAllForRequester(
+    currentUser: any,
+    status?: string,
+    type?: string,
+    role?: string,
+    clientEmail?: string,
+  ): Promise<User[]> {
+    const requester = this.extractRequester(currentUser);
+    if (!requester.role) {
+      throw new ForbiddenException('Utilisateur non authentifié');
+    }
+    if (requester.role === UserRole.ADMIN) {
+      return this.findAll(status, type, role);
+    }
+    if (requester.role === UserRole.ORGANISATION) {
+      if (!requester.organisationId) {
+        throw new ForbiddenException('Compte organisation invalide (organisationId manquant)');
+      }
+      const queryBuilder = this.userRepository.createQueryBuilder('user');
+
+      if (role === UserRole.CLIENT) {
+        queryBuilder.andWhere('user.role = :clientRole', { clientRole: UserRole.CLIENT });
+        const emailNorm = (clientEmail ?? '').trim().toLowerCase();
+        if (emailNorm) {
+          /** Recherche ciblée (ex. initier une demande) : client rattaché à l’org **ou** sans organisationId. */
+          queryBuilder.andWhere('LOWER(user.email) = :clientEmailNorm', { clientEmailNorm: emailNorm });
+          queryBuilder.andWhere(
+            '(user.organisationId = :organisationId OR user.organisationId IS NULL)',
+            { organisationId: requester.organisationId },
+          );
+        } else {
+          queryBuilder.andWhere('user.organisationId = :organisationId', { organisationId: requester.organisationId });
+        }
+      } else {
+        queryBuilder.andWhere('user.organisationId = :organisationId', { organisationId: requester.organisationId });
+        queryBuilder.andWhere('user.role = :orgMemberRole', { orgMemberRole: UserRole.ORGANISATION });
+        if (role && role !== UserRole.ORGANISATION) {
+          return [];
+        }
+      }
+
+      if (status === 'active') queryBuilder.andWhere('user.isActive = :isActive', { isActive: true });
+      else if (status === 'inactive') queryBuilder.andWhere('user.isActive = :isActive', { isActive: false });
+      if (type) queryBuilder.andWhere('user.type = :type', { type });
+
+      return queryBuilder
+        .select([
+          'user.id',
+          'user.name',
+          'user.firstName',
+          'user.lastName',
+          'user.email',
+          'user.phone',
+          'user.role',
+          'user.type',
+          'user.organisationId',
+          'user.organisationRole',
+          'user.isActive',
+          'user.isEmailVerified',
+          'user.lastLogin',
+          'user.createdAt',
+          'user.updatedAt',
+        ])
+        .orderBy('user.createdAt', 'DESC')
+        .getMany();
+    }
+    throw new ForbiddenException('Accès interdit');
+  }
+
   async findOne(id: string): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id },
@@ -295,6 +430,19 @@ export class UsersService {
       throw new NotFoundException('Utilisateur non trouvé');
     }
     const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword as User;
+  }
+
+  async findOneForRequester(id: string, currentUser: any): Promise<User> {
+    const target = await this.userRepository.findOne({
+      where: { id },
+      relations: ['organisation'],
+    });
+    if (!target) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+    this.assertCanAccessTarget(currentUser, target);
+    const { password, ...userWithoutPassword } = target;
     return userWithoutPassword as User;
   }
 
@@ -368,14 +516,18 @@ export class UsersService {
       user.phone = updateDto.phone;
     }
     if (updateDto.email !== undefined) {
+      const normalizedEmail = (updateDto.email || '').trim().toLowerCase();
+      if (!normalizedEmail) {
+        throw new BadRequestException('Email invalide');
+      }
       // Vérifier que l'email n'est pas déjà utilisé
       const existingUser = await this.userRepository.findOne({
-        where: { email: updateDto.email },
+        where: { email: normalizedEmail },
       });
       if (existingUser && existingUser.id !== userId) {
         throw new ConflictException('Cet email est déjà utilisé');
       }
-      user.email = updateDto.email;
+      user.email = normalizedEmail;
     }
     if (updateDto.address !== undefined) {
       user.address = updateDto.address;
@@ -419,6 +571,15 @@ export class UsersService {
     return userWithoutPassword as User;
   }
 
+  async activateForRequester(id: string, currentUser: any): Promise<User> {
+    const target = await this.userRepository.findOne({ where: { id } });
+    if (!target) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+    this.assertCanAccessTarget(currentUser, target);
+    return this.activate(id);
+  }
+
   async deactivate(id: string): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) {
@@ -428,6 +589,15 @@ export class UsersService {
     const updatedUser = await this.userRepository.save(user);
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword as User;
+  }
+
+  async deactivateForRequester(id: string, currentUser: any): Promise<User> {
+    const target = await this.userRepository.findOne({ where: { id } });
+    if (!target) {
+      throw new NotFoundException('Utilisateur non trouvé');
+    }
+    this.assertCanAccessTarget(currentUser, target);
+    return this.deactivate(id);
   }
 
   async getStatistics() {
@@ -445,6 +615,38 @@ export class UsersService {
       active,
       inactive: total - active,
     };
+  }
+
+  async getStatisticsForRequester(currentUser: any) {
+    const requester = this.extractRequester(currentUser);
+    if (!requester.role) {
+      throw new ForbiddenException('Utilisateur non authentifié');
+    }
+    if (requester.role === UserRole.ADMIN) {
+      return this.getStatistics();
+    }
+    if (requester.role === UserRole.ORGANISATION) {
+      if (!requester.organisationId) {
+        throw new ForbiddenException('Compte organisation invalide (organisationId manquant)');
+      }
+      const [total, active] = await Promise.all([
+        this.userRepository.count({
+          where: { role: UserRole.ORGANISATION, organisationId: requester.organisationId },
+        }),
+        this.userRepository.count({
+          where: { role: UserRole.ORGANISATION, organisationId: requester.organisationId, isActive: true },
+        }),
+      ]);
+
+      return {
+        total,
+        clients: 0,
+        organisations: total,
+        active,
+        inactive: total - active,
+      };
+    }
+    throw new ForbiddenException('Accès interdit');
   }
 
   /**
