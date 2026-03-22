@@ -1,4 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, Brackets } from 'typeorm';
 import { QueryFailedError } from 'typeorm';
@@ -16,6 +24,10 @@ import { SmsService } from '../common/services/sms.service';
 import { MinioService } from '../storage/minio.service';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '../auth/dto/register.dto';
+import { FormsService } from '../forms/forms.service';
+
+const CLIENT_PDF_EDITOR_REDIRECT = 'client_pdf_editor_redirect';
+const CLIENT_UPLOAD_TOKEN_EXPIRATION = '7d' as const;
 
 @Injectable()
 export class RequestsService {
@@ -39,6 +51,8 @@ export class RequestsService {
     private smsService: SmsService,
     private minioService: MinioService,
     private jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly formsService: FormsService,
   ) { }
 
   /**
@@ -420,14 +434,29 @@ export class RequestsService {
         throw new InternalServerErrorException('Erreur lors de l\'enregistrement de la demande.');
       }
 
-      // Envoyer l'OTP par email (non bloquant)
+      // Envoyer l'OTP par email (non bloquant) + lien secure-pdf si flux « org → client »
       const finalRequestNumber = savedRequest.requestNumber ?? draft.requestNumber;
+      const fd = savedRequest.formData as Record<string, unknown> | undefined;
+      const clientReviewFlow = fd?.clientReviewFlow === true;
+      let pdfReviewLink: string | undefined;
+      if (clientReviewFlow) {
+        const apiBase = this.getPublicApiBaseUrl();
+        if (apiBase) {
+          const redirectTok = this.createClientPdfEditorRedirectToken(savedRequest.id);
+          pdfReviewLink = `${apiBase}/requests/client-pdf-editor?t=${encodeURIComponent(redirectTok)}`;
+        } else {
+          this.logger.warn(
+            'clientReviewFlow: PUBLIC_API_BASE_URL ou FRONTEND_URL manquant — lien PDF non inclus dans l’e-mail',
+          );
+        }
+      }
       try {
         await this.emailService.sendRequestOtpEmail(
           verificationEmail,
           otpCode,
           finalRequestNumber!,
           client.name,
+          pdfReviewLink,
         );
       } catch (emailError: any) {
         this.logger.warn(`Envoi OTP email pour demande ${finalRequestNumber} échoué: ${emailError?.message}`);
@@ -818,6 +847,118 @@ export class RequestsService {
       { requestId, type: 'upload' },
       { expiresIn: this.UPLOAD_TOKEN_EXPIRATION },
     );
+  }
+
+  /**
+   * Jeton court dans l’e-mail → URL publique `/requests/client-pdf-editor?t=...`
+   */
+  createClientPdfEditorRedirectToken(requestId: string): string {
+    const secret = this.configService.get<string>('JWT_SECRET') || 'your-secret-key-change-in-production';
+    return this.jwtService.sign(
+      { requestId, type: CLIENT_PDF_EDITOR_REDIRECT },
+      { secret, expiresIn: '7d' },
+    );
+  }
+
+  /**
+   * Construit l’URL complète secure-pdf (docs à jour, uploadToken longue durée).
+   */
+  async resolveClientPdfEditorRedirect(token: string): Promise<string> {
+    const secret = this.configService.get<string>('JWT_SECRET') || 'your-secret-key-change-in-production';
+    let payload: { requestId?: string; type?: string };
+    try {
+      payload = this.jwtService.verify(token, { secret }) as { requestId?: string; type?: string };
+    } catch {
+      throw new BadRequestException('Lien invalide ou expiré');
+    }
+    if (payload?.type !== CLIENT_PDF_EDITOR_REDIRECT || !payload.requestId) {
+      throw new BadRequestException('Lien invalide');
+    }
+    const request = await this.findOne(payload.requestId);
+    if (request.status !== RequestStatus.EN_ATTENTE) {
+      throw new BadRequestException('Cette demande n’est plus disponible pour cette étape');
+    }
+    const docs = await this.buildPdfEditorDocsFromRequest(request);
+    if (!docs.length) {
+      throw new BadRequestException('Aucun formulaire PDF à ouvrir pour cette demande');
+    }
+    const uploadToken = this.jwtService.sign(
+      { requestId: request.id, type: 'upload' },
+      { secret, expiresIn: CLIENT_UPLOAD_TOKEN_EXPIRATION },
+    );
+    const pdfBase = (this.configService.get<string>('PDF_EDITOR_BASE_URL') || '').replace(/\/$/, '');
+    if (!pdfBase) {
+      throw new InternalServerErrorException(
+        'Configuration PDF_EDITOR_BASE_URL manquante (URL de l’app secure-pdf)',
+      );
+    }
+    const clientFront = (
+      this.configService.get<string>('CLIENT_FRONT_BASE_URL') ||
+      this.configService.get<string>('FRONTEND_URL') ||
+      ''
+    ).replace(/\/$/, '');
+    if (!clientFront) {
+      throw new InternalServerErrorException(
+        'Configuration CLIENT_FRONT_BASE_URL ou FRONTEND_URL manquante',
+      );
+    }
+    const title = encodeURIComponent(request.formName || 'Demande');
+    const subtitle = encodeURIComponent(request.organisationName || '');
+    const returnUrl = encodeURIComponent(
+      `${clientFront}/client/demandes?requestId=${encodeURIComponent(request.id)}#fromPdfEditor`,
+    );
+    const docsParam = encodeURIComponent(JSON.stringify(docs));
+    return `${pdfBase}?docs=${docsParam}&requestId=${encodeURIComponent(request.id)}&uploadToken=${encodeURIComponent(uploadToken)}&returnUrl=${returnUrl}&title=${title}&subtitle=${subtitle}`;
+  }
+
+  /**
+   * URLs présignées pour l’éditeur : PDFs déjà enregistrés sur la demande (chemins MinIO) ou modèles du formulaire.
+   */
+  async buildPdfEditorDocsFromRequest(request: Request): Promise<Array<{ label: string; url: string }>> {
+    const out: Array<{ label: string; url: string }> = [];
+    if (Array.isArray(request.submittedForms)) {
+      for (const sf of request.submittedForms) {
+        const row = sf as { label: string; pdfUrl?: string; storagePath?: string };
+        const sp = row.storagePath;
+        if (sp) {
+          try {
+            const url = await this.minioService.getPresignedUrl(sp);
+            if (url) out.push({ label: row.label, url });
+          } catch (e: any) {
+            this.logger.warn(`buildPdfEditorDocsFromRequest storagePath ${sp}: ${e?.message}`);
+          }
+        } else if (row.pdfUrl) {
+          out.push({ label: row.label, url: row.pdfUrl });
+        }
+      }
+    }
+    const single = request.submittedForm as { pdfUrl?: string; storagePath?: string } | undefined;
+    if (out.length === 0 && single) {
+      if (single.storagePath) {
+        try {
+          const url = await this.minioService.getPresignedUrl(single.storagePath);
+          if (url) out.push({ label: request.formName || 'Formulaire', url });
+        } catch (e: any) {
+          this.logger.warn(`buildPdfEditorDocsFromRequest submittedForm: ${e?.message}`);
+        }
+      } else if (single.pdfUrl) {
+        out.push({ label: request.formName || 'Formulaire', url: single.pdfUrl });
+      }
+    }
+    if (out.length === 0 && request.formId) {
+      const opt = await this.formsService.getFormPdfOptions(request.formId);
+      return (opt.all || []).filter((d) => !!d?.url);
+    }
+    return out.filter((d) => !!d.url);
+  }
+
+  /** Base publique API pour liens dans les e-mails (ex. https://api.example.com/api). */
+  getPublicApiBaseUrl(): string {
+    const explicit = (this.configService.get<string>('PUBLIC_API_BASE_URL') || '').replace(/\/$/, '');
+    if (explicit) return explicit;
+    const front = (this.configService.get<string>('FRONTEND_URL') || '').replace(/\/$/, '');
+    if (front) return `${front}/api`;
+    return '';
   }
 
   async findByOrganisation(organisationId: string, status?: string, formType?: string): Promise<Request[]> {
@@ -1229,6 +1370,7 @@ export class RequestsService {
         label: String(label).trim(),
         fileName: file.originalname || fileName,
         pdfUrl: presignedUrl,
+        storagePath: minioPath,
         version,
         editorState: editorState ?? undefined,
       };
@@ -1239,9 +1381,11 @@ export class RequestsService {
       }
       // Premier PDF de la liste = submittedForm pour compatibilité
       if (request.submittedForms.length > 0) {
+        const first = request.submittedForms[0];
         request.submittedForm = {
-          pdfUrl: request.submittedForms[0].pdfUrl,
-          version: request.submittedForms[0].version || version,
+          pdfUrl: first.pdfUrl,
+          storagePath: first.storagePath,
+          version: first.version || version,
         };
       }
     } else {
@@ -1249,6 +1393,7 @@ export class RequestsService {
       request.submittedForm = {
         pdfUrl: presignedUrl,
         version,
+        storagePath: minioPath,
       };
     }
 

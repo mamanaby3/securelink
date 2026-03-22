@@ -110,6 +110,8 @@ export class Request {
   @Column({ type: 'jsonb', nullable: true })
   submittedForm?: {
     pdfUrl?: string;
+    /** Chemin MinIO pour régénérer une URL présignée (lien e-mail client / secure-pdf). */
+    storagePath?: string;
     version: string;
   };
 
@@ -119,6 +121,7 @@ export class Request {
     label: string;
     fileName?: string;
     pdfUrl?: string;
+    storagePath?: string;
     version?: string;
   }>;
 

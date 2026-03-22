@@ -4,17 +4,20 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { RequestsService } from './requests.service';
 import { RequestsController } from './requests.controller';
+import { RequestsPublicController } from './requests-public.controller';
 import { Request } from './entities/request.entity';
 import { User } from '../auth/entities/user.entity';
 import { Form } from '../forms/entities/form.entity';
 import { UserDocument } from '../users/entities/user-document.entity';
 import { DocumentType } from '../documents/entities/document-type.entity';
 import { AuthModule } from '../auth/auth.module';
+import { FormsModule } from '../forms/forms.module';
 import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
 
 @Module({
   imports: [
     ConfigModule,
+    FormsModule,
     TypeOrmModule.forFeature([Request, User, Form, UserDocument, DocumentType]),
     AuthModule,
     JwtModule.registerAsync({
@@ -26,7 +29,7 @@ import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
       inject: [ConfigService],
     }),
   ],
-  controllers: [RequestsController],
+  controllers: [RequestsController, RequestsPublicController],
   providers: [RequestsService, JwtOrUploadTokenGuard],
   exports: [RequestsService],
 })

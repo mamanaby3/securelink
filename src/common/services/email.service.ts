@@ -87,15 +87,24 @@ export class EmailService {
     }
   }
 
-  async sendRequestOtpEmail(to: string, otp: string, requestNumber: string, userName?: string): Promise<void> {
+  async sendRequestOtpEmail(
+    to: string,
+    otp: string,
+    requestNumber: string,
+    userName?: string,
+    pdfReviewLink?: string,
+  ): Promise<void> {
     if (!this.transporter) {
       this.logger.warn('Transporter email non initialisé. Email non envoyé.');
       console.log(`[DEV] Code OTP de demande pour ${to}: ${otp}`);
+      if (pdfReviewLink) console.log(`[DEV] Lien PDF client: ${pdfReviewLink}`);
       return;
     }
 
-    const subject = `Code de vérification - Demande ${requestNumber} - Secure Link`;
-    const html = this.getRequestOtpEmailTemplate(otp, requestNumber, userName);
+    const subject = pdfReviewLink
+      ? `Finaliser votre demande ${requestNumber} - Secure Link`
+      : `Code de vérification - Demande ${requestNumber} - Secure Link`;
+    const html = this.getRequestOtpEmailTemplate(otp, requestNumber, userName, pdfReviewLink);
 
     try {
       const info = await this.transporter.sendMail({
@@ -103,7 +112,9 @@ export class EmailService {
         to,
         subject,
         html,
-        text: `Votre code de vérification pour la demande ${requestNumber} est : ${otp}. Ce code expire dans 10 minutes.`,
+        text: pdfReviewLink
+          ? `Demande ${requestNumber}. Ouvrez le lien reçu dans l’e-mail HTML pour vérifier les formulaires PDF, puis utilisez le code : ${otp} (10 min).`
+          : `Votre code de vérification pour la demande ${requestNumber} est : ${otp}. Ce code expire dans 10 minutes.`,
       });
 
       this.logger.log(`Email OTP de demande envoyé à ${to}. Message ID: ${info.messageId}`);
@@ -676,7 +687,28 @@ export class EmailService {
     `;
   }
 
-  private getRequestOtpEmailTemplate(otp: string, requestNumber: string, userName?: string): string {
+  private getRequestOtpEmailTemplate(
+    otp: string,
+    requestNumber: string,
+    userName?: string,
+    pdfReviewLink?: string,
+  ): string {
+    const pdfBlock = pdfReviewLink
+      ? `
+    <h2>Étape 1 — Vérifier et signer les formulaires</h2>
+    <p>Une organisation a prérempli votre dossier pour la demande <strong>${requestNumber}</strong>. Ouvrez l’éditeur PDF pour contrôler les informations, compléter si besoin, enregistrer et signer.</p>
+    <p style="margin: 24px 0;">
+        <a href="${pdfReviewLink}" style="display: inline-block; padding: 14px 28px; background-color: #0d9488; color: #fff; text-decoration: none; font-weight: bold; border-radius: 8px;">Ouvrir les formulaires (secure-pdf)</a>
+    </p>
+    <p style="font-size: 13px; color: #444;">Après enregistrement dans l’éditeur, vous serez renvoyé vers votre espace <strong>Mes demandes</strong> pour la dernière étape.</p>
+
+    <h2>Étape 2 — Code de vérification</h2>
+    <p>Sur l’espace client, finalisez la soumission avec le code ci-dessous :</p>
+    `
+      : `
+    <p>Votre demande <strong>${requestNumber}</strong> a été soumise avec succès. Pour finaliser la soumission, veuillez utiliser le code de vérification suivant :</p>
+    `;
+
     return `
 <!DOCTYPE html>
 <html>
@@ -692,7 +724,7 @@ export class EmailService {
     
     ${userName ? `<p>Bonjour <strong>${userName}</strong>,</p>` : '<p>Bonjour,</p>'}
     
-    <p>Votre demande <strong>${requestNumber}</strong> a été soumise avec succès. Pour finaliser la soumission, veuillez utiliser le code de vérification suivant :</p>
+    ${pdfBlock}
     
     <div style="padding: 20px; text-align: center; margin: 30px 0; border: 1px solid #000;">
         <p style="margin: 0; font-size: 14px;">Code de vérification</p>
@@ -701,7 +733,7 @@ export class EmailService {
     
     <p><strong>Ce code expire dans 10 minutes.</strong></p>
     
-    <p>Si vous n'avez pas soumis cette demande, veuillez ignorer cet email ou contacter le support.</p>
+    <p>Si vous n'avez pas initié cette demande, veuillez ignorer cet email ou contacter le support.</p>
     
     <hr style="border: none; border-top: 1px solid #000; margin: 30px 0;">
     
