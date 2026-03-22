@@ -29,7 +29,8 @@ import { JwtOrUploadTokenGuard } from './guards/jwt-or-upload-token.guard';
       inject: [ConfigService],
     }),
   ],
-  controllers: [RequestsController, RequestsPublicController],
+  /** PublicController en premier : sinon `GET :id` capture `client-pdf-editor` et renvoie 401. */
+  controllers: [RequestsPublicController, RequestsController],
   providers: [RequestsService, JwtOrUploadTokenGuard],
   exports: [RequestsService],
 })
